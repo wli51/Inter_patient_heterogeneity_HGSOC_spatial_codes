@@ -328,5 +328,12 @@ patch
 ```
 
 ```{r}
-ggsave('main_fig_utah_st_cluster_DEG_cell2loc', plot = patch, width = 24, height = 20, units = "in", dpi = 330, bg = "white", limitsize = F)
+ggsave('main_fig_utah_st_cluster_DEG_cell2loc.png', 
+       plot = patch, 
+       width = 24, 
+       height = 20, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
