@@ -2,14 +2,13 @@ library(Seurat)
 library(dplyr)
 library(magrittr)
 
-### Runs the analysis pipeline on Utah Visium samples. 
-# Reads inputs from 10x visium ouput (h5 file, image, scale etc.) and saves intermediate object as rds file
-# Preprocessing involves SCT normalization and regressing out read counts, percent.mt and percent.ribo genes per spot
-# specifically, no QC based on read count or mt gene percentage is performed here
-# Computes PCA but does no further clustering (as clusterings are to be generated from NMF of the integrated dataset) 
-# Identifies spatially variable genes via the moran's I value 
+### This script loads and preprocesses the Utah Visium samples. 
 
-# where visium data lives 
+### Prerequisites:  ** none
+
+dir.create(file.path("..", "analysis_output", "Utah_st"))
+
+# ----- visium spaceranger output dir ----- # 
 dir <- file.path("..", "data", "visium_JD24379", "Primary_data")
 
 sample_folder_names <- c("1A-Bottom-Half-Tissue-set2_results", 
@@ -20,6 +19,7 @@ sample_folder_names <- c("1A-Bottom-Half-Tissue-set2_results",
 # abbreviation for each sample to avoid having long names 
 sample_abbrs = c("1A", "2B", "3C", "4D")
 
+# ----- load and preprocessing ----- # 
 for (i in 1:length(sample_abbrs)) {
   
   folder = sample_folder_names[i]
@@ -48,7 +48,7 @@ for (i in 1:length(sample_abbrs)) {
   visium_obj <- PercentageFeatureSet(visium_obj, "^MT-", col.name = "percent.mt")
   visium_obj <- PercentageFeatureSet(visium_obj, "^RP[SL]", col.name = "percent.ribo")
   
-  # normalization, scaling and PCA
+  # normalization done with SCTransform, regressing out mito, ribo conc
   visium_obj <- SCTransform(visium_obj, assay = "Spatial", verbose = FALSE, vars.to.regress = c("percent.mt", "percent.ribo", "nCount_Spatial"))
   visium_obj <- ScaleData(visium_obj, assay = "SCT", features = rownames(visium_obj))
   visium_obj <- RunPCA(visium_obj, npcs = 30, assay = "SCT")
@@ -60,5 +60,5 @@ for (i in 1:length(sample_abbrs)) {
   visium_obj = FindSpatiallyVariableFeatures(visium_obj, assay = "SCT", features = hvg,
                                              selection.method = "moransi")
   
-  saveRDS(visium_obj, file = file.path("..", "analysis_output", "Utah_st",paste0("visium_", abbr, ".rds")))
+  saveRDS(visium_obj, file = file.path("..", "analysis_output", "Utah_st", paste0("visium_", abbr, ".rds")))
 }
