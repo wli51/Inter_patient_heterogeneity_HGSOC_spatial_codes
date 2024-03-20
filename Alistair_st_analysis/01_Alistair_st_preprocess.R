@@ -4,11 +4,18 @@ library(magrittr)
 library(dplyr)
 library(Seurat)
 
+### This script loads and preprocesses the Utah Visium samples
+
+### Prerequisites:  ** none
+
+# ----- visium space ranger output data dir ----- # 
 dir <- file.path("..", "data", "Alistair")
 sample_folders = as.character(6506110:6506117)
+
+# abbreviation for each sample to avoid having long names 
 sample_abbrs = paste0("SP", 1:8)
 
-
+# ----- load and preprocessing ----- # 
 for (i in 1:length(sample_folders)) {
   
   sample = sample_folders[i]

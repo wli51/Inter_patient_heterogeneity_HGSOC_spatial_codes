@@ -5,6 +5,9 @@ library(magrittr)
 ### This script loads prepossessed visium data and performs seurat anchor based integration 
 # anchor with 3000 features chosen by SelectIntegrationFeatures
 
+### Prerequisites:  01_Alistair_st_preprocess.R output
+
+# abbreviation for each sample to avoid having long names 
 sample_abbrs = paste0("SP", 1:8)
 
 # Load seurat objects 
@@ -18,38 +21,44 @@ for (i in 1:length(sample_abbrs)) {
   
 }
 
-common_gene_names = Reduce(intersect, sapply(obj.list, FUN = function(x) rownames(x@assays$SCT@scale.data), simplify = F))
+common_gene_names = Reduce(intersect, sapply(obj.list, FUN = function(x) rownames(x@assays$SCT@data), simplify = F))
 
-for (i in 1:length(obj.list)) {
-  svgs = obj.list[[i]]@assays$SCT@meta.features %>% filter(moransi.spatially.variable) %>% arrange(moransi.spatially.variable.rank)
-}
+int_features <- SelectIntegrationFeatures(object.list = obj.list, 
+                                          assay = rep("SCT", length(obj.list)), 
+                                          nfeatures = 3000)
 
-int_features <- SelectIntegrationFeatures(object.list = obj.list, assay = rep("SCT", length(obj.list)), nfeatures = 3000)
-anchors <- FindIntegrationAnchors(object.list = obj.list, scale = FALSE, 
-                                  reference = NULL, reduction = "cca", 
-                                  anchor.features = int_features, assay = rep("SCT", length(obj.list)))
+anchors <- FindIntegrationAnchors(object.list = obj.list, 
+                                  assay = rep("SCT", length(obj.list)), 
+                                  scale = TRUE, 
+                                  reference = NULL, 
+                                  reduction = "cca", 
+                                  anchor.features = int_features)
+
+
 obj.integrated <- 
   IntegrateData(anchorset = anchors, dims = 1:30, 
                 features.to.integrate	= common_gene_names # explicitly stating that we want the top svgs in the integrated dataset
   ) 
 
-obj.integrated@meta.data$sample = sample
+rm(obj.list, anchors); gc()
+obj.integrated.diet = DietSeurat(obj.integrated, assays = "integrated", layers = c("data"))
 
-obj.integrated = ScaleData(obj.integrated, assay = "integrated", features = rownames(obj.integrated))
-obj.integrated <- RunPCA(obj.integrated, verbose = FALSE, assay = "integrated")
-obj.integrated <- RunUMAP(obj.integrated, dims = 1:30)
-obj.integrated <- FindNeighbors(obj.integrated, dims = 1:30)
-obj.integrated <- FindClusters(obj.integrated, resolution = 0.4)
+obj.integrated.diet = ScaleData(obj.integrated.diet, assay = "integrated", features = rownames(obj.integrated))
+obj.integrated.diet <- RunPCA(obj.integrated.diet, verbose = FALSE, assay = "integrated")
+obj.integrated.diet <- RunUMAP(obj.integrated.diet, dims = 1:30)
+obj.integrated.diet <- FindNeighbors(obj.integrated.diet, dims = 1:30)
+obj.integrated.diet <- FindClusters(obj.integrated.diet, resolution = 0.4)
 
-saveRDS(obj.integrated@graphs, 
-        file = file.path("..", "analysis_output", "Alistair_st", "visium_alistair_integrate_graphs.rds"))
-saveRDS(obj.integrated@reductions, 
-        file = file.path("..", "analysis_output", "Alistair_st", "visium_alistair_integrate_reductions.rds"))
-saveRDS(obj.integrated@meta.data %>% dplyr::select(sample, barcode, seurat_clusters), 
-        file = file.path("..", "analysis_output", "Alistair_st", "visium_alistair_integrate_cluster.rds"))
-
-obj.integrated.diet = DietSeurat(obj.integrated, assays = "integrated", scale.data = FALSE)
+obj.integrated.diet@assays$integrated@scale.data = matrix(nrow=0,ncol=0)
 
 saveRDS(obj.integrated.diet, file = file.path("..", "analysis_output", "Alistair_st", "visium_alistair_integrate_diet.rds"))
+
+metadata = obj.integrated.diet@meta.data
+
+metadata %>% 
+  dplyr::select(barcode, sample, seurat_clusters) %>%
+  write.csv(file.path("intermediate_output", "seurat_cluster_metadata.csv"), 
+            row.names=FALSE,
+            quote = F)
 
 
