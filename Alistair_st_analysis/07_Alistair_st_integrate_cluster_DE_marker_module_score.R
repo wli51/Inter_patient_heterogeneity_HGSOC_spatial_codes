@@ -2,6 +2,10 @@ library(Seurat)
 library(magrittr)
 library(dplyr)
 
+### this script computes the seurat module score for the manually curated DEG genesets
+
+### Prerequisites:  06_Alistair_st_integrate_cluster_DE_manual.R
+
 dir = file.path("..", "analysis_output", "Alistair_st", )
 
 # reads the DE genesets per spot on Alistair samples

@@ -2,10 +2,10 @@ library(Seurat)
 library(magrittr)
 library(dplyr)
 
-# this script performs filtering of integrate cluster DE results
-# required output from: 
-# ** 03_Alistair_st_integrate_cluster_DE.R 
-# ** 04_Alistair_st_integrate_cluster_DE_fib_rich.R
+
+### this script involves manual curation of integrate cluster DE results
+
+### Prerequisites:  04_Alistair_st_integrate_cluster_DE_fib_rich.R
 
 dir = file.path("..", "analysis_output", "Alistair_st")
 
