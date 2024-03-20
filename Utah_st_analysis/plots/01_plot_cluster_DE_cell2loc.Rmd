@@ -1,0 +1,332 @@
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(magrittr)
+library(patchwork)
+```
+
+```{r}
+sample_abbrs = c("2B", "3C", "4D")
+```
+
+# load seurat objects for individual samples and integrated dataset and NMF clustering information
+```{r}
+dir = file.path("..", "..", "analysis_output", "Utah_st")
+obj.list = list()
+for (i in 1:length(sample_abbrs)) {
+  obj.list[[i]] = readRDS(file.path(dir, paste0("visium_", sample_abbrs[i], ".rds")))
+}
+```
+
+```{r}
+obj.integrated = readRDS(file = file.path("..", "..", "analysis_output", "Utah_st", "visium_utah_integrate.rds"))
+```
+
+```{r}
+load(file.path("..", "intermediate_output", "vb_nmf_cluster_info.RData"))
+nmf_clusters = unique(cluster_ids)[order(unique(cluster_ids))]
+```
+
+```{r}
+NMF_summary_df = data.frame(sample = sample, 
+                            barcode = barcodes, 
+                            cluster = cluster_ids)
+NMF_summary_df
+```
+
+append NMF clustering to seurat metadata
+```{r}
+for (i in 1:length(sample_abbrs)) {
+  filter = sample == sample_abbrs[i]
+  clusters = cluster_ids[filter]
+  
+  match_ordering = match(colnames(obj.list[[i]]), barcodes[filter])
+  
+  obj.list[[i]]@meta.data$NMF_cluster = clusters[match_ordering]
+}
+```
+
+```{r}
+match_ordering = match(rownames(obj.integrated@meta.data), names(cluster_ids))
+any(is.na(match_ordering))
+obj.integrated@meta.data$NMF_cluster = cluster_ids[match_ordering]
+obj.integrated$NMF_cluster = factor(as.character(obj.integrated$NMF_cluster))
+```
+
+# plot summary plot for NMF clustering 
+
+```{r}
+# cluster color palette 
+col_pal = setNames(RColorBrewer::brewer.pal(n = 10, name = "Set3"), as.character(1:10))
+```
+
+```{r, fig.height=5, fig.width=3}
+summary_plot = NMF_summary_df %>% 
+  dplyr::mutate(value = 1,
+                cluster = factor(cluster)) %>% 
+  ggplot(aes(x = factor(sample), y = value, fill = cluster)) + 
+  geom_bar(stat = "identity", position  = "stack", width = 0.75) + 
+  theme_minimal() + 
+  theme(axis.line.y = element_blank()) + 
+  scale_fill_manual(name = "NMF cluster", values = col_pal) + 
+  labs(y = "Spot count", x = "Sample") + 
+  scale_x_discrete(limits=rev) + 
+  theme(legend.position = "right",
+        legend.direction = "vertical",
+        panel.grid.major = element_blank())
+summary_plot
+```
+# plot NMF cluster in space
+```{r, warning=FALSE, message=FALSE}
+plot.list.spatial = list()
+
+plt.sf = 1.5
+
+for (i in 1:length(sample_abbrs)) {
+  sf = obj.list[[i]]@images[[1]]@scale.factors$lowres
+  df = merge(obj.list[[i]]@meta.data, obj.list[[i]]@images[[1]]@coordinates, by = "row.names") %>%
+    dplyr::mutate(imagerow = imagerow * sf,
+                  imagecol = imagecol * sf)
+  
+  plot.list.spatial[[i]] = df %>%
+    ggplot(aes(
+      x = imagecol,
+      y = -imagerow,
+      fill = factor(`NMF_cluster`)
+    )) +
+    ggstar::geom_star(starshape = 6,
+                      size = plt.sf,
+                      starstroke = 0) +
+    ylim(c(-600, 0)) + xlim(0, 600) +
+    coord_fixed() +
+    theme_void() +
+    theme(legend.position = "none") +
+    scale_fill_manual(values = col_pal, drop = F) +
+    guides(fill = guide_legend(
+      ncol = 1,
+      override.aes = list(size = 5),
+      title = "Cluster",
+      title.position = "top"
+    )) 
+  
+}
+```
+
+```{r, fig.width=15, fig.height=8}
+all.spatial.plot = wrap_plots(plot.list.spatial) + 
+  plot_layout(ncol = 3, 
+              heights =  unit(8, "in"), 
+              widths = unit(c(5,5,5), rep("in", 3)),
+              guides = "collect"
+              )
+all.spatial.plot
+```
+
+# load nebula DEG output
+
+```{r}
+library(nebula)
+```
+
+```{r}
+re.utah.nmf = readRDS(file = file.path("..", "intermediate_output", "DE", "nebula_utah_nmf.rds"))
+re.utah.nmf$summary = re.utah.nmf$summary[re.utah.nmf$convergence > -20,]
+```
+
+```{r}
+cols_lfc = re.utah.nmf$summary %>% 
+  dplyr::select(starts_with("logFC_")) %>% 
+  colnames()
+
+cols_pval = re.utah.nmf$summary %>% 
+  dplyr::select(starts_with("p_")) %>% 
+  colnames()
+
+predictors = sapply(strsplit(cols_lfc, "_"), FUN = function(x) x[[length(x)]])
+
+row_lfc_summary_df = 
+  data.frame(t(apply(re.utah.nmf$summary[cols_lfc],1,FUN = function(x) order(x, decreasing = T)[1:2], simplify = T)),
+             t(apply(re.utah.nmf$summary[cols_lfc],1,FUN = function(x) x[order(x, decreasing = T)][1:2], simplify = T))
+)
+colnames(row_lfc_summary_df) = c("max_cluster", "sec_max_cluster", "lfc_max_cluster", "lfc_sec_max_cluster")
+
+row_pval_summary_df = NULL 
+for (i in 1:dim(row_lfc_summary_df)[1]) {
+  row_pval_summary_df = rbind(row_pval_summary_df,
+                           c(re.utah.nmf$summary[i, cols_pval[row_lfc_summary_df[i, 1]]], 
+                             re.utah.nmf$summary[i, cols_pval[row_lfc_summary_df[i, 2]]]))
+}
+colnames(row_pval_summary_df) = c("pval_max_cluster", "pval_sec_max_cluster")
+
+row_lfc_summary_df$max_cluster = predictors[row_lfc_summary_df$max_cluster]
+row_lfc_summary_df$sec_max_cluster = predictors[row_lfc_summary_df$sec_max_cluster]
+
+nmf_de_genes_df = cbind(re.utah.nmf$summary[c("gene_id", "gene")], 
+                        re.utah.nmf$overdispersion,
+                        row_lfc_summary_df, 
+                        row_pval_summary_df
+                        ) %>% 
+  dplyr::filter(pval_max_cluster <= 0.05,
+                !grepl("^MT-", gene)) %>% 
+  group_by(max_cluster) %>%
+  dplyr::arrange(max_cluster, pval_max_cluster) 
+
+nebula_features = split(nmf_de_genes_df$gene, nmf_de_genes_df$max_cluster)
+nebula_top_features = sapply(nebula_features, FUN =function(x) x[1:min(15, length(x))], simplify = F)
+```
+
+# plot top DEGs
+```{r, fig.width=25, fig.height=4}
+obj.integrated@meta.data$NMF_cluster_order = 
+  factor(obj.integrated@meta.data$NMF_cluster, levels = as.character(1:10))
+
+expr.dot.plt = DotPlot(
+  obj.integrated,
+  assay = "integrated",
+  features = nebula_top_features[predictors],
+  group.by = "NMF_cluster_order"
+) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  guides(color = guide_colorbar(title = 'Raw z-score')) + 
+  scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") 
+
+expr.dot.plt
+```
+
+# load cell2location output
+```{r, warning=FALSE}
+library(readr)
+cell2loc_export = list()
+cell2loc_export_long = list()
+for (i in 1:length(sample_abbrs)) {
+  cell2loc_export[[i]] = read_csv(file.path("..", "cell2loc_export","export", sample_abbrs[i], "cell2loc.csv"))
+  colnames(cell2loc_export[[i]])[1] = 'barcode'
+  
+  cell2loc_export_long[[i]] = cell2loc_export[[i]] %>% 
+  dplyr::select(-c(`in_tissue`, `array_col`, `array_row`, `_indices`, `_scvi_batch`, `_scvi_labels`)) %>% 
+  tidyr::pivot_longer(cols = -c("barcode")) 
+}
+```
+
+```{r}
+plot_df = NULL
+for (i in 1:length(sample_abbrs)) {
+  sample_abbr = sample_abbrs[i]
+  
+  sf = obj.list[[i]]@images[[1]]@scale.factors$lowres
+  df = merge(
+    obj.list[[i]]@meta.data %>% dplyr::select(NMF_cluster),
+    obj.list[[i]]@images[[1]]@coordinates,
+    by = "row.names"
+  ) %>%
+    dplyr::mutate(imagerow = imagerow * sf,
+                  imagecol = imagecol * sf)
+  rownames(df) = df$Row.names
+  df = df %>% dplyr::select(-`Row.names`)
+  
+  cell2loc_df = as.data.frame(cell2loc_export[[i]])
+  rownames(cell2loc_df) = cell2loc_df$barcode
+  cell2loc_df = cell2loc_df %>% 
+    dplyr::select(-c(`in_tissue`, `array_col`, `array_row`, `_indices`, `_scvi_batch`, `_scvi_labels`))
+  
+  df = merge(df, cell2loc_df, by = "row.names")
+  df = df %>%
+    dplyr::select(NMF_cluster,
+                  row,
+                  col,
+                  imagerow,
+                  imagecol,
+                  all_of(colnames(cell2loc_df)))
+  plot_df = rbind(plot_df,
+                  cbind(df, sample = sample_abbrs[i]))
+}
+
+plot_df = plot_df %>%
+  tidyr::pivot_longer(cols = -c("NMF_cluster", "sample", "barcode", "row", "col", "imagerow", "imagecol"))
+```
+
+# plot cell2location summary and spatial visualization
+
+```{r}
+col_pal = setNames(RColorBrewer::brewer.pal(n = 10, name = "Set3"), as.character(1:10))
+```
+
+```{r, fig.width=10, fig.height=8}
+plt.abun.summary = plot_df %>%
+  dplyr::filter(name %in% c("Epithelial cell-0", "Epithelial cell-16", "Epithelial cell-3", "Epithelial cell-4", "Epithelial cell-17")) %>%
+  ggplot(aes(
+    x = factor(NMF_cluster),
+    fill = factor(NMF_cluster),
+    y = value
+  )) +
+  geom_boxplot() +
+  facet_grid(sample ~ name) +
+  ylim(0,6) + 
+  theme_minimal() +
+  scale_fill_manual(values = col_pal,
+                    name = "Cluster") 
+plt.abun.summary
+```
+
+```{r, fig.width=15, fig.height=8}
+ct_select = c("Epithelial cell-0", "Epithelial cell-16")
+plt.pt.size = 1
+colpal = rev(RColorBrewer::brewer.pal(n = 9, name = "RdYlBu"))
+
+plt.ct.abun = plot_df %>% 
+  dplyr::filter(name %in% ct_select) %>% 
+  ggplot(aes(
+    x = imagecol,
+    y = -imagerow,
+    fill = value
+  )) +
+  ggstar::geom_star(starshape = 6,
+                    size = plt.pt.size,
+                    starstroke = 0) +
+  ylim(c(-600, 0)) + xlim(0, 600) +
+  facet_grid(sample ~ name,
+             switch = "y") +
+  scale_y_continuous(position = "right") +
+  coord_fixed() +
+  theme_void() + 
+  scale_fill_gradientn(colors = colpal,
+                       breaks=c(0, 1, 3, 5),
+                       limits = c(0, 5),
+                       na.value = colpal[length(colpal)])
+
+plt.ct.abun
+```
+
+# create final figure
+
+```{r}
+layout <- c(
+  
+  area(1, 1, 1, 1),
+  area(1, 2, 1, 2),
+  area(1, 3, 1, 3),
+  area(1, 4, 1, 4),
+  area(2, 1, 2, 4),
+  area(3, 1, 4, 2),
+  area(3, 3, 4, 4)
+)
+
+plot(layout)
+```
+
+```{r, fig.width=24, fig.height=20, dpi = 330, warning=FALSE}
+patch = 
+  plot.list.spatial[[1]] + plot.list.spatial[[2]] + plot.list.spatial[[3]] + summary_plot + 
+  expr.dot.plt + plt.ct.abun + plt.abun.summary + 
+  plot_layout(design = layout,
+              heights = unit(c(5, 2, 4), rep('inch', 3)),
+              widths = unit(c(5, 5, 5, 2), rep('inch', 4))) +
+  plot_annotation(tag_levels = 'A') &
+  theme(title = element_text(size = 12))
+patch
+```
+
+```{r}
+ggsave('main_fig_utah_st_cluster_DEG_cell2loc', plot = patch, width = 24, height = 20, units = "in", dpi = 330, bg = "white", limitsize = F)
+```
