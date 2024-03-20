@@ -1,0 +1,388 @@
+```{r}
+library(Seurat)
+library(magrittr)
+library(dplyr)
+library(ggplot2)
+
+library(patchwork)
+library(grid)
+```
+
+```{r}
+sample_order = c("SP1", "SP7", "SP5", "SP6", "SP2", "SP3", "SP8")
+cluster_color_palette = setNames(
+  c(RColorBrewer::brewer.pal(n = 11, name = "Set3"), "#777777"),
+  as.character(0:11)
+)
+```
+
+```{r}
+metadata = readRDS(file = file.path("..", "..", "analysis_output", "visium_alistair_integrate_cluster.rds"))
+sample_abbrs = paste0("SP", 1:8)
+obj.list = list()
+
+for (i in 1:length(sample_abbrs)) {
+  sample_abbr = sample_abbrs[i]
+  
+  obj.list[[sample_abbr]] = readRDS(file.path("..", "..", "analysis_output",  paste0("visium_", sample_abbr,".rds")))
+  barcodes_sample = metadata[metadata$sample == sample_abbr,]$barcode
+  cluster_sample = metadata[metadata$sample == sample_abbr,]$seurat_clusters
+  match_idx = match(rownames(obj.list[[sample_abbr]]@meta.data), barcodes_sample)
+  obj.list[[sample_abbr]]$seurat_clusters = cluster_sample[match_idx]
+}
+```
+
+```{r}
+module.score.list = list()
+for (i in 1:length(sample_abbrs)) {
+  sample_abbr = sample_abbrs[i]
+  
+  module.score.list[[sample_abbr]] = readRDS(file = file.path("..", "intermediate_output", paste0("integrate_DE_module_score_",sample_abbrs[i], ".rds")))
+  match_idx = match(rownames(obj.list[[sample_abbr]]@meta.data), rownames(module.score.list[[sample_abbr]]))
+  ms = module.score.list[[i]]
+  obj.list[[sample_abbr]]@meta.data = cbind(obj.list[[sample_abbr]]@meta.data, ms[match_idx,])
+}
+```
+
+```{r}
+nebula_cluster_degs_filter = readRDS(file = file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs.rds"))
+nebula_cluster_degs_filter = nebula_cluster_degs_filter[as.character(0:11)[as.character(0:11) %in% names(nebula_cluster_degs_filter) ]]
+nebula_cluster_degs_ct_independent = readRDS(file =file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs_ct_ind.rds") )
+nebula_cluster_degs_ct_dependent = readRDS(file =file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs_ct_dep.rds") )
+```
+
+# basic plot settings 
+
+```{r}
+hex.sf = 1
+plot.width = 3 # inches, width and height of each spatial plot cell
+label.height = 0.5 # inches
+
+empty_text_grob = wrap_elements(grid::textGrob(" ", x=.5, y=.5, rot=0))
+```
+
+# produce heatmap column
+
+```{r}
+common_gene_names = Reduce(intersect, sapply(obj.list, FUN = function(x) rownames(x@assays[["SCT"]])))
+
+# All Major histocompatiblity complex genes 
+hla_genes = common_gene_names[grep("^HLA-[ABCEF]", common_gene_names)]
+hla_d_genes = common_gene_names[grep("^HLA-D[PQRMO]", common_gene_names)]
+hla_features = c(hla_genes[order(hla_genes)][1:4], hla_d_genes[order(hla_d_genes)][1:6])
+
+# All immunoglobulin coding genes
+ig_genes= common_gene_names[grep("^IG[KLH]", common_gene_names)]
+ig_features = ig_genes[order(ig_genes)]
+
+deg_features = names(nebula_cluster_degs_filter[["4"]])
+
+immune_genesets = list(
+  "c4 DEGs" = deg_features,
+  "MHC" = hla_features,
+  "IG" = ig_features
+)
+
+cor_mat.list = list()
+
+for (i in 1:length(sample_abbrs)) {
+  sample_abbr = sample_abbrs[i]
+  x = obj.list[[sample_abbr]]@assays$SCT@scale.data[unlist(immune_genesets),]
+  cor_mat = cor(x=t(as.matrix(x)), y = NULL, method = "spearman", use = "complete.obs") 
+  
+  diag(cor_mat) = NA
+  cor_mat.list[[sample_abbr]] = cor_mat
+  
+}
+
+gene2group = setNames(rep(
+  names(immune_genesets ),
+  sapply(immune_genesets , FUN = length)
+),
+unlist(immune_genesets))
+
+bklist = seq(from = -0.5, to = 0.5, by = 0.25)
+tidyheatmap_pal = circlize::colorRamp2(bklist, rev(colorRampPalette(colors = c(
+  "red", "white", "blue"
+))(length(bklist))))
+ht.map.body.size = unit(2, "in")
+fontsize = 5
+corr.heatmap.list = list()
+for (s in sample_order) {
+  corr.heatmap.list[[s]] = cor_mat.list[[s]] %>%
+    as.data.frame() %>%
+    dplyr::mutate(gene1 = unlist(immune_genesets)) %>%
+    dplyr::relocate(gene1) %>%
+    tidyr::pivot_longer(cols = -c(gene1),
+                        names_to = "gene2",
+                        values_to = "corr") %>%
+    dplyr::mutate(
+      group1 = factor(gene2group[gene1], levels = names(immune_genesets)),
+      group2 = factor(gene2group[gene2], levels = names(immune_genesets))
+    ) %>%
+    group_by(group1, group2) %>%
+    dplyr::filter(group1  %in% names(immune_genesets),
+                  group2 %in% names(immune_genesets)) %>%
+    tidyHeatmap::heatmap(
+      `gene1`,
+      `gene2`,
+      `corr`,
+      palette_value = tidyheatmap_pal,
+      cluster_rows = F,
+      cluster_columns = F,
+      row_title = "",
+      column_title = "",
+      row_names_gp = gpar(fontsize = fontsize),
+      column_names_gp = gpar(fontsize = fontsize),
+      row_title_gp = gpar(fontsize = 0),
+      column_title_gp = gpar(fontsize = 0),
+      show_heatmap_legend = T,
+      width = ht.map.body.size,
+      height = ht.map.body.size,
+      heatmap_legend_param = list(legend_gp  = gpar(fontsize = fontsize))
+    )
+}
+
+corr.heatmap.list = sapply(corr.heatmap.list, FUN = function(x) tidyHeatmap::wrap_heatmap(x), simplify = F)
+heatmap_grob = patchworkGrob(wrap_plots(corr.heatmap.list)+ 
+  plot_layout(ncol = 1)) 
+```
+
+
+# generate cluster spatial plot column
+
+```{r}
+plot_spatial_hex_discrete <- function(sobj,
+                             fill.feature = NULL,
+                             color.feature = NULL,
+                             fill.colpal = NULL,
+                             color.colpal = NULL,
+                             hex.sf = 1.5,
+                             hex.stroke = 0,
+                             legend.position = "none",
+                             legend.direction = "horizontal") {
+  
+  sf = sobj@images[[1]]@scale.factors$lowres
+  plot_df = merge(sobj@meta.data, sobj@images[[1]]@coordinates, by = "row.names") %>%
+    dplyr::mutate(y = imagerow * sf,
+                  x = imagecol * sf)
+  
+  
+  if (is.null(fill.feature) & !is.null(color.feature)) {
+    p_clus = plot_df %>%
+    ggplot(aes(
+      x = x,
+      y = -y,
+      color = .data[[color.feature]] 
+    )) +
+    scale_color_manual(values = color.colpal, drop = F) 
+  } else if (!is.null(fill.feature) & is.null(color.feature)){
+    p_clus = plot_df %>%
+    ggplot(aes(
+      x = x,
+      y = -y,
+      fill = .data[[fill.feature]],
+    )) +
+    scale_fill_manual(values = fill.colpal, drop = F) 
+  } else if (!is.null(fill.feature) & !is.null(color.feature)) {
+    p_clus = plot_df %>%
+    ggplot(aes(
+      x = x,
+      y = -y,
+      fill = .data[[fill.feature]],
+      color = .data[[color.feature]]
+    )) +
+    scale_fill_manual(values = fill.colpal, drop = F) +
+    scale_color_manual(values = color.colpal, drop = F) 
+  } else {
+    return(NULL)
+  }
+  
+  p_clus = p_clus +
+    ggstar::geom_star(starshape = 6,
+                      size = hex.sf,
+                      starstroke = hex.stroke) +
+    ylim(c(-600, 0)) + xlim(0, 600) +
+    coord_fixed() +
+    theme_void() +
+    theme(legend.position = legend.position, legend.direction = legend.direction)
+  
+  return(p_clus)
+}
+
+cluster.plot.list = list()
+for (s in sample_order) {
+  cluster.plot.list[[s]] = plot_spatial_hex_discrete(obj.list[[s]],
+                                                     fill.feature = "seurat_clusters",
+                                                     fill.colpal = cluster_color_palette,
+                                                     hex.sf = hex.sf
+                                                     )
+}
+
+cluster_grob = patchworkGrob(wrap_plots(cluster.plot.list) +
+                               plot_layout(ncol = 1))
+```
+
+# generate the 3 gene program value columns 
+
+```{r}
+col_annotation_text = c("Cluster 4 DE genes", "Major Histocompatibility Complex", "Immunoglobulin")
+patch.col.label = list()
+for (i in 1:length(col_annotation_text)) {
+  patch.col.label[[i]] = wrap_elements(grid::textGrob(col_annotation_text[[i]], x=.5, y=.5, rot=0))
+}
+
+legend.xy = c(0.15, 0.15)
+legend.title.size = 5
+legend.label.size = 3
+legend.key.size = 0.1
+legend.key.size.unit = "in"
+hex.sf = 1
+
+features = c("4", "MHC", "IG")
+module.score.patch.list = list()
+for (feature in features) {
+  module.score.plot.list = list()
+  for (s in sample_order) {
+    sobj = obj.list[[s]]
+    sf = sobj@images[[1]]@scale.factors$lowres
+    plot_df = merge(sobj@meta.data, sobj@images[[1]]@coordinates, by = "row.names") %>%
+      dplyr::mutate(y = imagerow * sf,
+                    x = imagecol * sf)
+    
+    module.score.plot.list[[s]] =  plot_df %>%
+      ggplot(aes(x = x,
+                 y = -y,
+                 fill = .data[[feature]])) +
+      ggstar::geom_star(starshape = 6,
+                        size = hex.sf,
+                        starstroke = 0) +
+      ylim(c(-600, 0)) + xlim(0, 600) +
+      coord_fixed() +
+      theme_void() +
+      scale_fill_binned(type = "viridis",
+                        n.breaks = 5) +
+      theme(
+        legend.position = legend.xy,
+        legend.direction = "horizontal",
+        legend.key.size = unit(legend.key.size,
+                               legend.key.size.unit),
+        legend.background = element_rect(
+          fill = "white",
+          linetype = "solid",
+          colour = "white"
+        )
+      ) +
+      guides(
+        fill = guide_colourbar(
+          title = "Seurat module-score",
+          title.position = "top",
+          title.theme = element_text(size = legend.title.size),
+          label.theme = element_text(size = legend.label.size)
+        )
+      )
+  }
+  
+  module.score.patch.list[[feature]] =
+    patchworkGrob(wrap_plots(module.score.plot.list) +
+    plot_layout(ncol = 1))
+}
+```
+
+# row annotation column 
+
+```{r}
+sample2subtype = setNames(
+  c("DIF", "DIF", "IMR", "IMR", "MES", "MES", "MES"),
+  sample_order
+)
+subtype2color = setNames(
+  c("#fb746b", "#7cab04", "#c37cfb"),
+  c("DIF", "IMR", "MES")
+)
+row_annotation_text = sample_order
+row_annotation_color = subtype2color[sample2subtype[row_annotation_text]]
+
+patch.row.label = list()
+for (i in 1:length(row_annotation_text)) {
+  patch.row.label[[i]] = wrap_elements(grobTree( rectGrob(gp=gpar(fill=row_annotation_color[i])), textGrob(row_annotation_text[[i]], x=.5, y=.5, rot=90)))
+}
+
+row_label_grob = patchworkGrob(wrap_plots(patch.row.label) + 
+  plot_layout(ncol = 1))
+```
+
+```{r}
+p = wrap_plots(c(
+  list(row_label_patch),
+  list(heatmap_grob),
+  module.score.patch.list,
+  list(cluster_grob)
+)) +
+  plot_layout(nrow = 1,
+              widths = c(label.height, plot.width * 1.5, rep(plot.width, (length(features) + 1)))) + 
+  plot_annotation(tag_levels = "A", tag_suffix = ".")
+
+ggsave(
+    filename = "figure_4_DEG_corr.png",
+    plot  = p,
+    path = ".",
+    width = label.height + plot.width * (length(features) + 2.5) ,
+    height = (plot.width * length(sample_order)),
+    units = "in",
+    dpi = 330,
+    limitsize = F,
+    bg = "white"
+  )
+```
+
+```{r, fig.width=5, fig.height=5}
+dummy_legend = NULL
+data.frame(
+  x = rep(0, length(cluster_color_palette)),
+  y = rep(0, length(cluster_color_palette)),
+  z = names(cluster_color_palette)
+)  %>%
+  dplyr::mutate(z = factor(z, levels = names(cluster_color_palette))) %>%
+  ggplot(aes(x = x, y = y, fill = z)) + ggstar::geom_star(starshape = 6,
+                                                          size = 1,
+                                                          starstroke = 0) +
+  scale_fill_manual(values = cluster_color_palette,
+                    drop = F,
+                    name = "cluster") +
+  theme_void() +
+  guides(fill = guide_legend(override.aes = list(size = 5))) + 
+  xlim(1,2) + ylim(1,2)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+

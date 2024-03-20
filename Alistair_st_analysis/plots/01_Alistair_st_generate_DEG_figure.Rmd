@@ -1,0 +1,384 @@
+```{r}
+library(Seurat)
+library(ggplot2)
+library(magrittr)
+library(dplyr)
+library(nebula)
+library('org.Hs.eg.db')
+library(DOSE)
+library(enrichplot)
+library(clusterProfiler)
+```
+
+```{r}
+dir = file.path("..", "..", "analysis_output", "Alistair_st")
+obj.integrated = readRDS(file.path(dir, "visium_alistair_integrate_diet.rds"))
+
+CARD_summary_df = readRDS(file = file.path("..", "..", "analysis_output", "CARD", "CARD_deconv_summary_scvi_reference.rds"))
+match_idx = match(rownames(obj.integrated@meta.data), CARD_summary_df$cell_id)
+CARD_summary_df = CARD_summary_df[match_idx,] %>% dplyr::select(-c("source", "sample", "cell_id"))
+any(is.na(match_idx))
+obj.integrated@meta.data = cbind(obj.integrated@meta.data, CARD_summary_df)
+celltypes = colnames(CARD_summary_df)
+
+metadata = obj.integrated@meta.data
+
+obj.integrated = ScaleData(obj.integrated, 
+                           assay = "integrated",
+                           features = rownames(obj.integrated@assays$integrated))
+```
+
+```{r}
+cluster_color_palette = setNames(
+  c(RColorBrewer::brewer.pal(n = 11, name = "Set3"), "#777777"),
+  as.character(0:11)
+)
+```
+
+```{r, fig.height=8, fig.width=12}
+plt.dimplot = DimPlot(obj.integrated, 
+        reduction = "umap", 
+        group.by = "seurat_clusters", 
+        label = T, 
+        pt.size = 0.7,
+        label.box = F) + 
+  coord_fixed() + 
+  scale_color_manual(values = cluster_color_palette) +
+  scale_fill_manual(values = cluster_color_palette) + 
+  ggtitle("")
+plt.dimplot
+```
+
+```{r}
+malignant_cluster_idx = c("0", "2", "7", "9", "10")
+MHC_cluster_idx = c("4")
+storma_cluster_idx = c("1")
+ecm_cluster_idx = c("3", "5", "6", "8", "11")
+cluster_order = c(malignant_cluster_idx, MHC_cluster_idx, storma_cluster_idx, ecm_cluster_idx)
+obj.integrated$seurat_clusters_order = factor(obj.integrated$seurat_clusters, levels = cluster_order)
+sample_order = paste0("SP", c(1,4,7,5,6,2,3,8))
+plt.barplot = obj.integrated@meta.data %>% 
+  dplyr::mutate(value = 1, 
+                sample = factor(sample, levels = sample_order),
+                cluster_type = factor(ifelse(seurat_clusters %in% malignant_cluster_idx, 
+                                      "Malignant-rich", 
+                                      ifelse(seurat_clusters %in% MHC_cluster_idx, 
+                                             "Macrophage-rich", 
+                                             "Fibroblast/Stroma-rich")), levels = c("Malignant-rich", "Macrophage-rich", "Fibroblast/Stroma-rich"))) %>% 
+  ggplot(aes(x = seurat_clusters_order, y = value, fill = sample)) + 
+  geom_bar(stat = "identity", position  = "fill", width = 0.75) + 
+  facet_grid(~cluster_type, scales="free", space = "free") +
+  theme_minimal() + 
+  theme(axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid = element_blank(),
+        strip.clip = "off") + 
+  labs(x = "Clusters", y = "Proportion") + 
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8, name="Dark2")) 
+plt.barplot
+```
+
+```{r}
+nebula_cluster_degs_filter = readRDS(file = file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs.rds"))
+nebula_cluster_degs_filter = nebula_cluster_degs_filter[as.character(0:11)[as.character(0:11) %in% names(nebula_cluster_degs_filter) ]]
+nebula_cluster_degs_ct_independent = readRDS(file =file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs_ct_ind.rds") )
+nebula_cluster_degs_ct_dependent = readRDS(file =file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs_ct_dep.rds") )
+```
+
+```{r, fig.width=30, fig.height=4}
+plt.dotplot = DotPlot(
+  obj.integrated,
+  assay = "integrated",
+  features = sapply(nebula_cluster_degs_filter, FUN = function(x) names(x)[1:min(15, length(x))], simplify = F),
+  group.by = "seurat_clusters"
+) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  guides(color = guide_colorbar(title = 'Raw z-score')) + 
+  scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") + 
+  ggtitle("Nebula cluster DEGs") + 
+  theme(strip.clip = "off")
+plt.dotplot
+```
+
+```{r, fig.width=30, fig.height=4}
+DotPlot(
+  obj.integrated,
+  assay = "integrated",
+  features = sapply(nebula_cluster_degs_ct_independent, FUN = function(x) names(x)[1:min(15, length(x))], simplify = F),
+  group.by = "seurat_clusters"
+) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  guides(color = guide_colorbar(title = 'Raw z-score')) + 
+  scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") + 
+  ggtitle("Nebula cluster DEGs not associated with composition")
+```
+
+```{r, fig.width=30, fig.height=4}
+DotPlot(
+  obj.integrated,
+  assay = "integrated",
+  features = sapply(nebula_cluster_degs_ct_dependent, FUN = function(x) names(x)[1:min(15, length(x))], simplify = F),
+  group.by = "seurat_clusters"
+) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  guides(color = guide_colorbar(title = 'Raw z-score')) + 
+  scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") + 
+  ggtitle("Nebula cluster DEGs associated with composition")
+```
+
+```{r}
+cluster_color_palette = setNames(
+  c(RColorBrewer::brewer.pal(n = 11, name = "Set3"), "#777777"),
+  as.character(0:11)
+)
+```
+
+```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
+xx.ego.BP = readRDS(
+  file = file.path(
+    "..",
+    "intermediate_output",
+    "nebula",
+    "nebula_top_deg_ct_dependent_ego_bp.rds"
+  )
+)
+
+plt.ego1 = emapplot(
+  xx.ego.BP,
+  pie = "count",
+  layout = "kk",
+  repel = T,
+  cex_label_category = 0.75,
+  cex_label_group = 2,
+  cex_category = 3,
+  cex_line = 0.5 ,
+  showCategory = 20,
+  node_label = "category",
+  label_format = 30,
+  nWords = 4
+) +
+  scale_fill_manual(values = cluster_color_palette,
+                    drop = FALSE,
+                    breaks = as.character(0:11)) +
+  theme(legend.key.size = unit(0.25, 'in')) 
+plt.ego1
+```
+
+```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
+xx.ego.BP = readRDS(
+  file = file.path(
+    "..",
+    "intermediate_output",
+    "nebula",
+    "nebula_top_deg_ct_independent_ego_bp.rds"
+  )
+)
+
+plt = emapplot(
+  xx.ego.BP,
+  pie = "count",
+  layout = "kk",
+  repel = T,
+  cex_label_category = 0.75,
+  cex_label_group = 2,
+  cex_category = 3,
+  cex_line = 0.5 ,
+  showCategory = 20,
+  node_label = "category",
+  label_format = 30,
+  nWords = 4
+) +
+  scale_fill_manual(values = cluster_color_palette,
+                    drop = FALSE,
+                    breaks = as.character(0:11)) +
+  theme(legend.key.size = unit(0.25, 'in')) 
+plt
+```
+
+```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
+xx.ego.BP = readRDS(
+  file = file.path(
+    "..",
+    "intermediate_output",
+    "nebula",
+    "nebula_all_deg_ego_bp.rds"
+  )
+)
+
+plt = emapplot(
+  xx.ego.BP,
+  pie = "count",
+  layout = "kk",
+  repel = T,
+  cex_label_category = 0.75,
+  cex_label_group = 2,
+  cex_category = 3,
+  cex_line = 0.5 ,
+  showCategory = 20,
+  node_label = "category",
+  label_format = 30,
+  nWords = 4
+) +
+  scale_fill_manual(values = cluster_color_palette,
+                    drop = FALSE,
+                    breaks = as.character(0:11)) +
+  theme(legend.key.size = unit(0.25, 'in')) 
+plt
+```
+
+```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
+xx.ego.BP = readRDS(
+  file = file.path(
+    "..",
+    "intermediate_output",
+    "nebula",
+    "nebula_ct_top_deg_ego_bp.rds"
+  )
+)
+
+plt.ego2 = emapplot(
+  xx.ego.BP,
+  pie = "count",
+  layout = "kk",
+  repel = T,
+  cex_label_category = 0.75,
+  cex_label_group = 2,
+  cex_category = 3,
+  cex_line = 0.5 ,
+  showCategory = 20,
+  node_label = "category",
+  label_format = 30,
+  nWords = 4
+) + 
+  guides(fill = guide_legend(title = "Celltype")) + 
+  theme(legend.key.size = unit(0.25, 'in')) 
+plt.ego2
+```
+```{r}
+library(patchwork)
+```
+
+```{r, fig.width=24, fig.height=21, dpi=330}
+patch = (((plt.dimplot | plt.barplot) + plot_layout(widths = c(0.7,0.3))) / 
+           plt.dotplot / 
+           ((plt.ego1 | plt.ego2) + plot_layout(widths = c(0.5,0.5))) ) + 
+  plot_layout(heights = c(6, 3, 12)) + 
+  plot_annotation(tag_levels = "A")
+```
+
+```{r}
+ggsave(filename = "figure_3_cluster_profiler.png", plot = patch, path = ".", width = 24, height = 21, dpi = 330, units = "in", bg = "white")
+```
+
+```{r}
+canonical_markers = list(
+"Epithelial" = c("EPCAM", "CLDN4", "KRT7", "KRT8", "KRT18", "MUC1", "CDH1"),
+"Immune" = c("CD68", "CD83"),
+"Stroma" = c("COL1A1", "COL3A1", "PDGFRA", "PDGFRB", "FAP", "FN1", "ACTA2", "CDH2")
+)
+canonical_markers
+```
+
+```{r, fig.width=6, fig.height=4, dpi = 330, warning=FALSE}
+obj.integrated@meta.data$seurat_clusters_order = 
+  factor(obj.integrated@meta.data$seurat_clusters, levels = cluster_order)
+plt.dotplot = DotPlot(
+  obj.integrated,
+  assay = "integrated",
+  features = canonical_markers,
+  group.by = "seurat_clusters_order"
+) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  guides(color = guide_colorbar(title = 'Raw z-score')) + 
+  scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") + 
+  ggtitle("Nebula cluster DEGs") + 
+  theme(strip.clip = "off")
+plt.dotplot
+```
+```{r}
+annotated_celltypes = unique(read.csv(file.path("..", "..", "data", "scVI_output", "annotation_dict.csv"), header = F)$V2)
+annotated_celltypes_order = c(annotated_celltypes[grepl("^Epithelial", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Endothelial", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Macrophage", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Plasmablast", annotated_celltypes)],
+                              annotated_celltypes[grepl("^T", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Fibroblast", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Myofibroblast", annotated_celltypes)])
+
+CARD_summary_df = readRDS(file = file.path("..", "..", "analysis_output", "CARD", "CARD_deconv_summary_scvi_reference.rds"))
+match_idx = match(CARD_summary_df$cell_id, 
+                  paste0(obj.integrated@meta.data$sample, "_", obj.integrated@meta.data$barcode))
+CARD_summary_df$seurat_clusters = obj.integrated@meta.data$seurat_clusters[match_idx]
+CARD_summary_df = CARD_summary_df[!is.na(CARD_summary_df$seurat_clusters),] 
+
+CARD_summary_df_long = CARD_summary_df %>% 
+  tidyr::pivot_longer(cols = -c(source, sample, cell_id, seurat_clusters), names_to = "celltype", values_to = "prop") %>% 
+  dplyr::mutate(celltype = factor(celltype, levels = annotated_celltypes_order),
+                seurat_clusters = factor(seurat_clusters, levels = cluster_order))
+```
+
+```{r, fig.width=8, fig.height=8}
+plt.barplot = CARD_summary_df_long %>% 
+  ggplot(aes(y = seurat_clusters, x = prop, fill = seurat_clusters)) + 
+  geom_boxplot(outlier.size = 0.5) +
+  facet_wrap(.~celltype) + 
+  scale_fill_manual(values = cluster_color_palette) + 
+  theme_minimal() + 
+  theme(legend.position = "none",
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA)) +
+  labs(x = "Proportion", y = "Cluster")
+plt.barplot
+```
+
+```{r, fig.width=12, fig.height=14}
+patch = ((plt.dotplot | plot_spacer()) / plt.barplot) + 
+  plot_layout(heights = unit(c(2, 8), c("in", "in")),
+              widths = unit(c(8, 4), c("in", "in"))) + 
+  plot_annotation(tag_levels = "A", tag_suffix = ".")
+
+patch
+```
+
+```{r}
+ggsave(filename = "suppl_figure_epi_stroma_deconv.png", plot = patch, path = ".", 
+       width = 12, height = 14, dpi = 330, units = "in", bg = "white")
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
