@@ -2,7 +2,9 @@ library(Seurat)
 library(dplyr)
 library(magrittr)
 
-### This script loads and preprocesses the Utah Visium samples. 
+### This script loads and preprocesses the Utah Visium samples, and then 
+# performs seurat anchor based integration 
+# anchor with 3000 features chosen by SelectIntegrationFeatures
 
 ### Prerequisites:  ** none
 
@@ -62,3 +64,31 @@ for (i in 1:length(sample_abbrs)) {
   
   saveRDS(visium_obj, file = file.path("..", "analysis_output", "Utah_st", paste0("visium_", abbr, ".rds")))
 }
+
+# extract top 1000 spatially variable features (pre-computed) per sample and take the union 
+sv_features = NULL
+
+for (i in 1:length(obj.list)) {
+  svgs = obj.list[[i]]@assays$SCT@meta.features %>% 
+    filter(moransi.spatially.variable) %>% 
+    arrange(moransi.spatially.variable.rank)
+  sv_features = union(sv_features, rownames(svgs)[1:1000])
+}
+
+int_features <- SelectIntegrationFeatures(object.list = obj.list, assay = rep("SCT", length(obj.list)), nfeatures = 3000)
+anchors <- FindIntegrationAnchors(object.list = obj.list, scale = FALSE, 
+                                  reference = NULL, reduction = "rpca", 
+                                  anchor.features = int_features, assay = rep("SCT", length(obj.list)))
+obj.integrated <- 
+  IntegrateData(anchorset = anchors, dims = 1:30, 
+                features.to.integrate	= union(int_features, sv_features) # explicitly stating that we want the top svgs in the integrated dataset
+  ) 
+
+obj.integrated = ScaleData(obj.integrated, assay = "integrated", features = rownames(obj.integrated))
+obj.integrated <- RunPCA(obj.integrated, verbose = FALSE, assay = "integrated")
+obj.integrated <- RunUMAP(obj.integrated, dims = 1:30)
+obj.integrated <- FindNeighbors(obj.integrated, dims = 1:30)
+obj.integrated <- FindClusters(obj.integrated, resolution = 0.4)
+
+saveRDS(obj.integrated, file = file.path("..", "analysis_output", "Utah_st", "visium_utah_integrate.rds"))
+saveRDS(sv_features, file = file.path("..", "analysis_output", "Utah_st", "integrate_svg.rds")) # also want to save the union of spatially variable features for use later in NMF
