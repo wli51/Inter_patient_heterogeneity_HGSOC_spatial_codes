@@ -1,0 +1,339 @@
+```{r}
+library(magrittr)
+library(dplyr)
+library(ggplot2)
+library(ggpattern)
+library(grid)
+library(patchwork)
+```
+
+```{r}
+df_all_sample_pathway = readRDS( 
+        file = file.path("..", "intermediate_output", "COMMOT_scaled_pathway.rds"))
+```
+
+# Load individual Visium samples and corresponding clustering assignment from integrated analysis   
+
+```{r}
+metadata = readRDS(file = file.path("..", "..", "analysis_output", "visium_alistair_integrate_cluster.rds"))
+sample_abbrs = paste0("SP", 1:8)
+obj.list = list()
+
+for (i in 1:length(sample_abbrs)) {
+  sample_abbr = sample_abbrs[i]
+  barcodes_sample = metadata[metadata$sample == sample_abbr,]$barcode
+  cluster_sample = metadata[metadata$sample == sample_abbr,]$seurat_clusters
+  
+  obj.list[[i]] = readRDS(file.path("..", "..", "analysis_output",  paste0("visium_", sample_abbr,".rds")))
+  match_idx = match(rownames(obj.list[[i]]@meta.data), barcodes_sample)
+  any(is.na(match_idx))
+  obj.list[[i]]$integrate_cluster = cluster_sample[match_idx]
+}
+
+df_all_sample_coords = NULL
+for (i in 1:length(sample_abbrs)) {
+  sample.sf = obj.list[[i]]@images[[1]]@scale.factors$lowres
+  df_all_sample_coords = rbind(df_all_sample_coords,
+                               obj.list[[i]]@images[[1]]@coordinates %>%
+                                 dplyr::mutate(barcode = row.names(.),
+                                               sample = sample_abbrs[i],
+                                               sf = sample.sf,
+                                               x = imagecol * sample.sf, 
+                                               y = -imagerow * sample.sf))
+}
+df_all_sample_coords = df_all_sample_coords %>%
+  dplyr::inner_join(metadata, by = c("sample", "barcode"))
+```
+
+```{r}
+df_all_sample_pathway
+```
+
+```{r}
+pathway_ordered = df_all_sample_pathway %>% 
+  dplyr::group_by(name) %>% 
+  dplyr::summarise(mean_signal = mean(value)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::arrange(desc(mean_signal)) %>% 
+  dplyr::select(name) %>% 
+  as.vector() 
+pathway_ordered = pathway_ordered[[1]]
+pathway_ordered
+```
+
+```{r}
+sample.colpal = setNames(RColorBrewer::brewer.pal(n=8, name = "Accent"), 
+                                      paste0("SP", 1:8))
+
+plt.hist = df_all_sample_pathway %>%
+  dplyr::select(barcode, sample, subtype, total.signaling) %>%
+  dplyr::distinct(barcode, sample, .keep_all = T) %>%
+  ggplot(aes(x = total.signaling, fill = sample)) + 
+  geom_histogram() + 
+  facet_grid(subtype~.) +
+  scale_fill_manual(values = sample.colpal) +
+  theme_minimal() + 
+  labs(x = "COMMOT total outgoing signal", 
+       y = "# Spots")
+plt.hist
+```
+
+```{r}
+col.label.grob.list = list()
+for (i in 1:length(sample.colpal)) {
+  s = names(sample.colpal)[i]
+  c = sample.colpal[i]
+  col.label.grob.list[[s]] =
+      wrap_elements(panel =
+                      grobTree(rectGrob(gp=gpar(fill=c)), textGrob(s, gp=gpar(fontsize=8, col="black")))
+                      )
+}
+```
+
+```{r}
+plot_df_all_sample_pathway = df_all_sample_pathway %>%
+  dplyr::select(barcode, sample, total.signaling, subtype) %>%
+  dplyr::distinct(barcode, sample, .keep_all = T) %>%
+  dplyr::inner_join(df_all_sample_coords, by = c("sample", "barcode")) %>%
+  dplyr::group_by(sample, seurat_clusters) %>%
+  dplyr::mutate(n = n()) 
+```
+
+```{r}
+plt.pt.size = 0.7
+star.stroke = 0.25
+cluster.colpal = setNames(c(RColorBrewer::brewer.pal(n = 11, name = "Set3"), "#777777"),
+                                 as.character(0:11))
+total.signal.breaks = seq(from = 0, to = 20, by = 5)
+total.signal.colpal =
+  colorRampPalette((RColorBrewer::brewer.pal(n = 7, name = "Greys")))(length(total.signal.breaks) - 1)
+total.signal.colpal[1] = "white"
+total.signal.labels = as.character(total.signal.breaks)
+# total.signal.labels[!total.signal.breaks %in% c("0", "5", "10", "15", "20")] = ""
+total.signal.limits = c(total.signal.breaks[1], total.signal.breaks[length(total.signal.breaks)])
+
+plt.spatial = plot_df_all_sample_pathway %>%
+  ggplot(aes(
+    x = x,
+    y = y,
+    fill = total.signaling,
+    color = seurat_clusters,
+  )) +
+  ggstar::geom_star(starshape = 6,
+                    size = plt.pt.size,
+                    starstroke = star.stroke) +
+  facet_grid(.~sample) +
+  ylim(c(-600, 0)) + xlim(0, 600) +
+  coord_fixed() +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  scale_y_continuous(position = "right") +
+  scale_fill_gradientn(
+    breaks = total.signal.breaks,
+    colours = total.signal.colpal,
+    labels = total.signal.labels,
+    limits = total.signal.limits,
+    name = "COMMOT total outgoing signal",
+  ) +
+  scale_color_manual(values = cluster.colpal,
+                     name = "Cluster",
+                     drop = F)  +
+  guides(
+    fill = guide_colorbar(),
+    colour = guide_legend(
+      override.aes = list(size = 2, starstroke = star.stroke*2),
+      nrow = 3
+    )
+  ) +
+  theme(
+    legend.text = element_text(size = 5),
+    legend.title = element_text(size = 8),
+    legend.position = "bottom"
+  )
+
+# ggsave(
+#     filename = "temp3.png",
+#     plot  = plt.spatial,
+#     path = file.path("."),
+#     width = 3*8,
+#     height = 3 + 1,
+#     units = "in",
+#     dpi = 330,
+#     limitsize = F,
+#     bg = "white"
+#   )
+```
+```{r, fig.width=12, fig.height=8}
+lr_value_summary = df_all_sample_pathway %>% 
+  dplyr::group_by(sample, name) %>%
+  dplyr::summarise(mean_value = mean(value))
+
+plt.pathway = df_all_sample_pathway %>% 
+  dplyr::left_join(lr_value_summary, by = c("sample", "name")) %>%
+  dplyr::mutate(name = factor(name, levels = rev(pathway_ordered)),
+                sample = factor(sample, 
+                                levels = paste0("SP", c(1, 4, 7, 5, 6, 2, 3 ,8)))
+                ) %>%
+  ggplot(aes(x = value, y = name, fill = mean_value)) + 
+  geom_violin(scale = "width") + 
+  facet_grid(. ~ sample) + theme_minimal() + 
+  scale_fill_gradient(low = "white", high = "red", name = "Mean scaled outgoing signal") + 
+  labs(y = "Cellchat Pathways",
+       x = "Aggregate scaled outgoing signal" ) + 
+  xlim(0, 75) +
+  theme(panel.grid.minor = element_blank())
+
+plt.pathway
+
+# ggsave("suppl_pathway_violin.png",
+#        plot = plt.pathway,
+#        path = ".",
+#        width = 12,
+#        height = 8, 
+#        units = "in",
+#        dpi = 330,
+#        limitsize = F,
+#        bg = "white")
+```
+
+```{r}
+patch = ((plt.hist | plt.pathway | plot_spacer()) / plt.spatial) + 
+  plot_layout(heights = c(4, 4)) +
+  plot_annotation(tag_levels = "A", tag_suffix = ".")
+
+ggsave(
+    filename = "suppl_fig_pathway_summary.png",
+    plot  = patch,
+    path = file.path("."),
+    width = 24,
+    height = 4 + 4 + 1,
+    units = "in",
+    dpi = 330,
+    limitsize = F,
+    bg = "white"
+  )
+```
+
+```{r}
+# card_deconv_props = readRDS( 
+#         file = file.path("..", "..", "analysis_output", "CARD", "CARD_deconv_summary_scvi_reference.rds"))
+```
+
+```{r}
+# df_card_deconv_prop = card_deconv_props %>% 
+#   dplyr::filter(source == "Alistair") %>%
+#   dplyr::mutate(barcode = sapply(str_split(cell_id, "_", simplify = F), "[[", 2)) %>%
+#   dplyr::select(-c("source", "cell_id")) %>% data.frame()
+# 
+# cts = colnames(df_card_deconv_prop)
+# cts = cts[!cts %in% c("sample", "barcode")]
+# 
+# df_commot_pathway_signal = df_all_sample_pathway %>%
+#   dplyr::select(sample, barcode, name, value) %>%
+#   dplyr::distinct(sample, barcode, name, .keep_all = T) %>%
+#   tidyr::pivot_wider(
+#     id_cols = c("sample", "barcode"),
+#     names_from = "name",
+#     values_from = "value"
+#   ) %>% data.frame()
+# 
+# ordered_pathway = lr_value_summary %>% 
+#   dplyr::arrange(desc(mean_value)) %>% 
+#   dplyr::ungroup() %>% 
+#   dplyr::select(name) %>% 
+#   as.vector() %>% 
+#   unlist() %>% unique()
+```
+
+```{r, fig.width=10, fig.height=4.5, warning=F, message=F}
+# ht.breaks = seq(from = -0.5, to = 0.5, by = 0.1)
+# ht.colpal = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdYlBu")))(length(ht.breaks))
+# 
+# df_card_commot = df_card_deconv_prop %>%
+#   dplyr::inner_join(df_commot_pathway_signal, by = c("sample", "barcode"))
+# 
+# for (s in sample_factor_level) {
+#   df_cor = df_card_commot %>%
+#     dplyr::filter(sample == s) %>%
+#     dplyr::select(-c("sample", "barcode"))
+#   
+#   corr_mat = cor(df_cor, use = "complete.obs", method = "spearman")
+#   
+#   pheatmap::pheatmap(
+#     corr_mat[cts, ordered_pathway],
+#     cluster_rows = F,
+#     cluster_cols = F,
+#     main = s,
+#     color = ht.colpal,
+#     breaks = ht.breaks
+#   )
+# }
+```
+
+```{r}
+# for (ct in cts) {
+#   for (pathway in ordered_pathway) {
+#     cor.test(df_cor[[ct]], df_cor[[pathway]], method = "spearman")
+#   }
+# }
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```

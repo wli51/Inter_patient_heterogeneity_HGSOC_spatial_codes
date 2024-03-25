@@ -1,0 +1,491 @@
+```{r}
+library(Seurat)
+library(magrittr)
+library(dplyr)
+library(ggplot2)
+library(ggpattern)
+library(grid)
+library(patchwork)
+```
+
+# Load individual Visium samples and corresponding clustering assignment from integrated analysis   
+
+```{r}
+metadata = readRDS(file = file.path("..", "..", "analysis_output", "visium_alistair_integrate_cluster.rds"))
+sample_abbrs = paste0("SP", 1:8)
+obj.list = list()
+
+for (i in 1:length(sample_abbrs)) {
+  sample_abbr = sample_abbrs[i]
+  barcodes_sample = metadata[metadata$sample == sample_abbr,]$barcode
+  cluster_sample = metadata[metadata$sample == sample_abbr,]$seurat_clusters
+  
+  obj.list[[i]] = readRDS(file.path("..", "..", "analysis_output",  paste0("visium_", sample_abbr,".rds")))
+  match_idx = match(rownames(obj.list[[i]]@meta.data), barcodes_sample)
+  any(is.na(match_idx))
+  obj.list[[i]]$integrate_cluster = cluster_sample[match_idx]
+}
+
+```
+
+```{r}
+df_all_sample_coords = NULL
+for (i in 1:length(sample_abbrs)) {
+  sample.sf = obj.list[[i]]@images[[1]]@scale.factors$lowres
+  df_all_sample_coords = rbind(df_all_sample_coords,
+                               obj.list[[i]]@images[[1]]@coordinates %>%
+                                 dplyr::mutate(barcode = row.names(.),
+                                               sample = sample_abbrs[i],
+                                               sf = sample.sf,
+                                               x = imagecol * sample.sf, 
+                                               y = -imagerow * sample.sf))
+}
+df_all_sample_coords = df_all_sample_coords %>%
+  dplyr::inner_join(metadata, by = c("sample", "barcode"))
+```
+
+```{r}
+
+subtype2indices = list()
+subtype2indices[["DIF"]] = c(1, 4, 7)
+subtype2indices[["IMR"]] = c(5, 6)
+subtype2indices[["MES"]] = c(2, 3, 8)
+
+sample_factor_level = sample_abbrs[unlist(subtype2indices)]
+```
+
+# Load cell-cell communication output  
+
+```{r}
+df_all_sample_lr = readRDS( 
+        file = file.path("..", "intermediate_output", "COMMOT_scaled_lr.rds"))
+
+df_lr_info = readRDS(
+        file = file.path("..", "intermediate_output", "COMMOT_lr_info.rds"))
+```
+
+```{r}
+plot_df_all_sample_lr = df_all_sample_lr %>%
+  dplyr::inner_join(df_all_sample_coords, by = c("sample", "barcode")) %>%
+  dplyr::mutate(value = ifelse(total.signaling == 0, NA, value))
+```
+
+```{r}
+all_lrs = unique(df_all_sample_lr$name)
+all_lrs = all_lrs[order(all_lrs)]
+all_lrs
+```
+
+```{r, fig.width=5, fig.height=5, warning=F, message=F}
+lrs_pathway_df = df_lr_info %>%
+  dplyr::filter(pathway %in% c(
+    "MK",
+    "MIF",
+    "SPP1"
+  )) %>%
+  dplyr::mutate(lr = paste0(ligand, ".", receptor)) %>% 
+  dplyr::arrange(pathway, lr) %>%
+  dplyr::filter(lr %in% unique(plot_df_all_sample_lr$name))
+
+lrs_select = lrs_pathway_df$lr
+lrs_select_pathway = lrs_pathway_df$pathway
+
+gap_index = NULL
+for (i in 2:length(lrs_select_pathway)) {
+  if (lrs_select_pathway[i-1] != lrs_select_pathway[i]) {
+    gap_index = c(gap_index, i-1)
+  }
+}
+  
+htmap.list = list()
+
+ht.breaks = seq(from = -1, to = 1, by = 0.1)
+ht.colpal = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdYlBu")))(length(ht.breaks))
+
+for (s in sample_factor_level) {
+  
+  # if (s == sample_factor_level[length(sample_factor_level)]) {
+  #   labels = lrs_select
+  #   legend=T
+  # } else {
+  #   labels = rep("", length(lrs_select))
+  #   legend=F
+  # }
+  
+  corr_df = plot_df_all_sample_lr %>%
+    dplyr::filter(sample == s) %>%
+    dplyr::select(sample, barcode, name, value) %>%
+    dplyr::distinct(sample, barcode, name, .keep_all = T) %>%
+    tidyr::pivot_wider(
+      id_cols = c("sample", "barcode"),
+      names_from = "name",
+      values_from = "value"
+    ) %>%
+    data.frame()
+  
+  rownames(corr_df) = paste0(corr_df$sample, "_", corr_df$barcode)
+  corr_df = corr_df %>% dplyr::select(-c("sample", "barcode"))
+  corr_mat = cor(corr_df, use = "complete.obs", method = "spearman")
+  
+    
+  htmap.list[[s]] = pheatmap::pheatmap(corr_mat[lrs_select, lrs_select],
+                                       cluster_rows = F, cluster_cols = F,
+                                       main = s,
+                                       color = ht.colpal,
+                                       breaks = ht.breaks,
+                                       gaps_row = gap_index,
+                                       gaps_col = gap_index,
+                                       show_rownames  = s == sample_factor_level[length(sample_factor_level)],
+                                       show_colnames  = F,
+                                       legend = s == sample_factor_level[length(sample_factor_level)])
+}
+```
+
+```{r, fig.width=26, fig.height=3.5}
+htmap.patch = wrap_plots(sapply(htmap.list, "[[", 4, simplify = F)) + 
+  plot_layout(nrow = 1,
+              widths = unit(c(rep(3, length(htmap.list)-1), 5), rep("in", length(htmap.list))))
+htmap.patch
+```
+
+# plot helper functions 
+
+```{r}
+tab_to_geom_tile <- function(tab, 
+                             border_col = "black",
+                             x_lab = "",
+                             y_lab = "",
+                             y_axis_on_right = T,
+                             show_x_text = T,
+                             show_y_text = T,
+                             breaks = seq(from=-1,to=1,by=0.05),
+                             colpal = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(length(summary.breaks) - 1),
+                             break_labels = as.character(breaks),
+                             limits = c(breaks[1], breaks[length(breaks)]),
+                             guide_name = "x",
+                             show_guide = F) {
+  
+  tab[tab > limits[2]] = limits[2]
+  tab[tab < limits[1]] = limits[1]
+  x = names(dimnames(tab))[2]
+  y = names(dimnames(tab))[1]
+  
+  as.data.frame.table(as.matrix(tab), responseName = "fill") %>%
+  ggplot(aes(x = .data[[x]], y = .data[[y]], fill = fill)) +
+  geom_tile(color = border_col) +
+    labs(x = "cluster") +
+    scale_y_discrete(position = ifelse(y_axis_on_right, "right", "left")) + 
+    scale_fill_gradientn(
+      breaks = breaks,
+      colours = colpal,
+      labels = break_labels,
+      limits = limits,
+      name = guide_name,
+    ) +
+    labs(x=x_lab, y=y_lab) + 
+    theme_minimal() +
+    theme(axis.title.y = element_text(size=6),
+          axis.title.x = element_text(size=6),
+          legend.position = ifelse(show_guide, "right", "none")
+          ) + 
+    guides(fill = guide_colorbar(
+      draw.ulim = FALSE,
+      draw.llim = FALSE, 
+      ticks = FALSE))
+  
+}
+
+```
+
+```{r, message=F, warning=F}
+plt.pt.size = 1
+text.grob.size = 12
+signal.breaks = c(0, 1, 5, 10, 100)
+signal.bin.labels = c("<1%", "1-5%", "5-10%", ">10%")
+signal.colpal = rev(colorRampPalette(
+  RColorBrewer::brewer.pal(length(signal.breaks), "Reds")
+)(length(signal.breaks) - 1))
+signal.colpal[length(signal.colpal)] = "white"
+
+spatial.patch.list = list()
+
+lrs_select = c("MIF.ACKR3",
+               "MIF.CD74_CD44",
+               "MIF.CD74_CXCR4",
+               "MDK.LRP1", 
+               "MDK.NCL",
+               "MDK.SDC1",
+               "MDK.SDC4",
+               "SPP1.CD44",
+               "SPP1.ITGAV_ITGB1",
+               "SPP1.ITGAV_ITGB5"
+               )
+
+col.label.grob.list = list()
+subtype_colpal = c("DIF" = "#fb746b", "IMR" = "#7cab04", "PRO" = "#0c9da9", "MES" = "#c37cfb")
+for (subtype in names(subtype2indices)) {
+    for (s in sample_abbrs[subtype2indices[[subtype]]]) {
+      
+      col.label.grob.list[[s]] =
+      wrap_elements(panel =
+                      grobTree(rectGrob(gp=gpar(fill=subtype_colpal[subtype])), 
+                               textGrob(s, gp=gpar(fontsize=text.grob.size, col="black")))
+                      )
+      
+    }
+}
+
+row.label.grob.list = list()
+
+spatial.plot.list = list()
+for (lr in lrs_select) {
+  
+  row.label.grob.list[[lr]] =
+      wrap_elements(panel = textGrob(lr, 
+                                     rot = 90,
+                                     gp = gpar(fontsize = text.grob.size)))
+  
+  for (subtype in names(subtype2indices)) {
+    for (s in sample_abbrs[subtype2indices[[subtype]]]) {
+      
+      
+      spatial.plot.list[[paste0(lr , "_", s)]] =  plot_df_all_sample_lr %>%
+        dplyr::filter(name == lr,
+                      sample == s) %>%
+        dplyr::mutate(
+          signal.bin =
+            cut(
+              value,
+              breaks = signal.breaks,
+              labels = signal.bin.labels,
+              right = F,
+              include.lowest = T
+            ),
+          signal.bin = factor(signal.bin, levels = rev(signal.bin.labels))
+        ) %>%
+        ggplot(aes(
+          x = x,
+          y = y,
+          fill = signal.bin
+        )) +
+        ggstar::geom_star(starshape = 6,
+                          size = plt.pt.size,
+                          starstroke = 0.00) +
+        ylim(c(-600, 0)) + xlim(0, 600) +
+        coord_fixed() +
+        theme_void() +
+        theme(
+          legend.position = "bottom",
+          legend.direction = "horizontal",
+          plot.title = element_text(hjust = 0.5)
+        ) +
+        scale_y_continuous(position = "right") +
+        scale_fill_manual(values = signal.colpal,
+                          name = "Scaled signaling",
+                          drop = F) +
+        theme(
+          legend.text = element_text(size = 5),
+          legend.title = element_text(size = 8),
+          legend.position = "none"
+        )
+    }
+  }
+}
+
+row.labels = wrap_plots(c(list(plot_spacer()), row.label.grob.list)) + 
+  plot_layout(ncol = 1,
+              heights = unit(c(0.25, rep(3, length(row.label.grob.list))), rep("in", length(row.label.grob.list) + 1)))
+
+spatial.patch = wrap_plots(c(col.label.grob.list, spatial.plot.list)) + 
+  plot_layout(ncol = length(unlist(subtype2indices)), 
+              heights = unit(c(0.25, rep(3, length(lrs_select))), rep("in", length(lrs_select) + 1)),
+              widths = unit(rep(3, length(unlist(subtype2indices))), rep("in", length(unlist(subtype2indices))))
+              )
+
+spatial.patch = (row.labels | spatial.patch) + 
+  plot_layout(widths = unit(c(0.25, 3 * length(unlist(subtype2indices))), rep("in", 2)))
+```
+
+```{r, warning=F, message=F}
+dummy.spatial = 
+  data.frame(x = c(0, 1), 
+             y = c(0, 1),
+             value = c(0, 100)
+             ) %>%
+        dplyr::mutate(
+          signal.bin =
+            cut(
+              value,
+              breaks = signal.breaks,
+              labels = signal.bin.labels,
+              right = F,
+              include.lowest = T
+            ),
+          signal.bin = factor(signal.bin, levels = rev(signal.bin.labels))
+        ) %>%
+        ggplot(aes(
+          x = x,
+          y = y,
+          fill = signal.bin
+        )) +
+        ggstar::geom_star(starshape = 6,
+                          size = plt.pt.size,
+                          starstroke = 0.00) +
+        scale_fill_manual(values = signal.colpal,
+                          name = "Scaled signaling",
+                          drop = F) + 
+  guides(fill = guide_legend(override.aes = list(size = 5)))
+
+sp.plot.legend = ggpubr::get_legend(dummy.spatial)
+sp.plot.legend = ggpubr::as_ggplot(sp.plot.legend)
+sp.plot.legend
+```
+
+```{r}
+layout <- c(
+  area(t = 1, l = 1, b = 1, r = 2),
+  area(t = 2, l = 2, b = 2, r = 3)
+)
+plot(layout)
+```
+
+```{r, fig.width=28, fig.height=25}
+full.patch = wrap_plots(list(patchworkGrob(spatial.patch), patchworkGrob(htmap.patch))) +
+  plot_layout(design = layout,
+              heights = unit(
+                c(3 * length(lrs_select) + 0.25, 3.25),
+                c("in", "in")
+              ),
+              widths = unit(
+                c(2, 3 * length(unlist(subtype2indices)), 0),
+                c("in", "in")
+              )) 
+
+ggsave(
+    filename = "suppl_fig_lr_spatial.png",
+    plot  = full.patch,
+    path = file.path("."),
+    width = 3 * length(unlist(subtype2indices)) + 5,
+    height = 3 * length(lrs_select) + 3.5 + 1,
+    units = "in",
+    dpi = 330,
+    limitsize = F,
+    bg = "white"
+  )
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
