@@ -8,6 +8,8 @@ library(Seurat)
 
 ### Prerequisites:  ** none
 
+dir.create(file.path(".", "intermediate_output"))
+
 # ----- visium space ranger output data dir ----- # 
 dir <- file.path("..", "data", "Alistair")
 sample_folders = as.character(6506110:6506117)

@@ -1,4 +1,3 @@
-
 ```{r}
 library(Seurat)
 library(magrittr)
@@ -48,36 +47,43 @@ obj.integrated@meta.data[["Verhaak.subtype"]] = pb_subtype_classification$Verhaa
 
 # Load CARD deconvolution results
 ```{r}
-card.full.out.list = list()
-card.full.out.merge = data.frame()
-spot_ids = NULL
-for (i in 1:length(sample_abbrs)) {
-  sample_abbr = sample_abbrs[i]
-  
-  card.full.out.list[[i]] = readRDS(file = file.path(
+annotation_dict = read_csv(file.path("..", 
+                                     "..",
+                                     "data", 
+                                     "scVI_integration_output", 
+                                     "annotation_dict.csv"),
+                           col_names = F)
+
+deconv.props.list.CARD = readRDS(
+  file = file.path(
     "..",
     "..",
-    "CARD_deconvolution",
+    "deconvolution",
     "intermediate_output",
-    "CARD_samplewise_output_old",
-    paste0("CARD_scvi_ref_full_output_", sample_abbr, ".rds")
-  ))
+    "CARD",
+    "props.rds"
+  )
+)
+
+# merge outputs 
+card.full.out.merge = NULL
+for (n in names(deconv.props.list.CARD)) {
+  abbr = strsplit(n, "_")[[1]][2]
+  s = strsplit(n, "_")[[1]][1]
   
-  spot_ids = c(spot_ids, 
-               paste0(sample_abbr, "_" , rownames(card.full.out.list[[i]])))
+  df = deconv.props.list.CARD[[n]]
+  spot_ids = paste0(abbr, "_" , rownames(df))
+  rownames(df) = spot_ids 
+  df = as_tibble(df)
+  df = df %>% 
+    dplyr::mutate(spot_id = spot_ids,
+                  sample = s)
   
   card.full.out.merge = rbind(card.full.out.merge,
-                              data.frame(sample = sample_abbrs[i], card.full.out.list[[i]], row.names = rownames(card.full.out.list[[i]])))
+                              df)
 }
 
-
-card.full.out.merge = tibble(card.full.out.merge)
-colnames(card.full.out.merge)[2:length(colnames(card.full.out.merge))] = colnames(card.full.out.list[[1]])
-card.full.out.merge = cbind("spot_id" = spot_ids, card.full.out.merge)
-```
-
-convert into long df format for plotting 
-```{r}
+# convert into long df format for plotting 
 deconv_df = obj.integrated@meta.data %>% 
   dplyr::mutate(spot_id = paste0(sample, "_", barcode)) %>% 
   dplyr::select(sample, seurat_clusters, spot_id, cOV.subtype) %>% 
@@ -87,12 +93,17 @@ deconv_df = obj.integrated@meta.data %>%
   tidyr::pivot_longer(cols = -c(sample, seurat_clusters, spot_id, cOV.subtype))
 deconv_df
 ```
+
 # Load cell types names present in the deconvolution results and specify a order
 ```{r}
-annotated_celltypes = unique(read.csv(file.path("..", "..", "data", "scVI_output", "annotation_dict.csv"), header = F)$V2)
+annotated_celltypes = unique(read.csv(file.path("..", "..", "data", "scVI_integration_output", "annotation_dict.csv"), header = F)$V2)
+
 annotated_celltypes_order = c(annotated_celltypes[grepl("^Epithelial", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Mesothelial", annotated_celltypes)],
                               annotated_celltypes[grepl("^Endothelial", annotated_celltypes)],
                               annotated_celltypes[grepl("^Macrophage", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Monocyte", annotated_celltypes)],
+                              annotated_celltypes[grepl("^pDC", annotated_celltypes)],
                               annotated_celltypes[grepl("^Plasmablast", annotated_celltypes)],
                               annotated_celltypes[grepl("^T", annotated_celltypes)],
                               annotated_celltypes[grepl("^Fibroblast", annotated_celltypes)],
@@ -110,6 +121,15 @@ panel.b = DimPlot(obj.integrated,
         axis.ticks = element_blank()) +
   labs(x = "UMAP 1", y = "UMAP 2")
 panel.b
+
+ggsave('main_fig_2_panel_b.png', 
+       plot = panel.b, 
+       width = 6, 
+       height = 4, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
 # Plot deconvolution classification, confidence scores across samples
 
@@ -123,7 +143,10 @@ sample_sort_by_subtype = c("2B", "3C", "4D", paste0("SP", c(1,4,7,5,6,2,3,8)))
 sample2source = 
   setNames(c(rep("Utah", 3), rep("Alistair", 8)), c("2B", "3C", "4D", paste0("SP", 1:8)))
 
-panel.a = results %>% 
+method_abbreviation = setNames(c("cOV", "Konency", "Verhaak"),
+                               c("consensusOV", "Konecny", "Verhaak"))
+
+panel.a = concensusOV_results %>% 
   dplyr::mutate(source = sample2source[sample]) %>% 
   group_by(method, subtype.score) %>% 
   mutate(`scaled confidence score` = scale_0_1(score),
@@ -145,6 +168,15 @@ panel.a = results %>%
   guides(fill = guide_legend(override.aes = list(size = 5)))
 
 panel.a
+
+ggsave('main_fig_2_panel_a.png', 
+       plot = panel.a, 
+       width = 6, 
+       height = 6, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
 # plot sample-wise distribution of integration clustering
 ```{r}
@@ -167,22 +199,31 @@ panel.c = obj.integrated@meta.data %>%
         panel.border = element_rect(color = "black", fill = NA)) + 
   guides(fill = guide_legend(override.aes = list(size = 5)))
 panel.c
+
+ggsave('main_fig_2_panel_c.png', 
+       plot = panel.c, 
+       width = 6, 
+       height = 3, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
 
 ```{r}
-features = c("Epithelial cell(WFDC2)", "Epithelial cell(KRT14)", "Macrophage(CD68)", "Plasmablast", 
-  "Fibroblast(COL1A1)", "Fibroblast(RAMP1)", "Fibroblast(DPT)", "Myofibroblast(PLN;ACTA2)")
+# omit plotting 2 cell types with very low proportions
+features = annotated_celltypes_order[!annotated_celltypes_order %in% c("T Lymphocyte(IGNG2)", "Monocyte(FCN1)")]
 
 panel.d = deconv_df %>%
   dplyr::filter(name %in% features) %>%
   dplyr::mutate(name = factor(name, levels = features),
                 subtype = factor(cOV.subtype, levels = c("DIF", "MES", "IMR"))) %>%
   ggplot(aes(y = subtype, x = value, fill = subtype)) + 
-  geom_boxplot(outlier.size = 0.25) + 
+  geom_violin(scale = "width") +
   facet_wrap(name ~ ., ncol = 4, drop = T) +
   theme_bw()  + 
   scale_fill_manual(name = "cOV pseudobulk-subtype", values = subtype_color_palette, drop=T) +
-  labs(x = "CARD deconvolution proprotion estimates", y = "Subtype") + 
+  labs(x = "RCTD proprotion", y = "Subtype") + 
   theme_minimal() + 
   theme(legend.position = "none",
         panel.grid.major.y = element_blank(),
@@ -191,18 +232,29 @@ panel.d = deconv_df %>%
   xlim(0, 1) + 
   scale_y_discrete(drop=T)
 panel.d
+
+ggsave('main_fig_2_panel_d.png', 
+       plot = panel.d, 
+       width = 8, 
+       height = 4, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
+
 ```{r}
+cluster_order = as.character(c(0, 3, 4, 5, 6, 1, 2, 7))
 panel.e = deconv_df %>%
   dplyr::filter(name %in% features) %>%
   dplyr::mutate(name = factor(name,levels = features),
                 seurat_clusters = factor(seurat_clusters, levels = cluster_order)) %>%
   ggplot(aes(y = seurat_clusters, x = value, fill = seurat_clusters)) + 
-  geom_boxplot(outlier.size = 0.25) + 
+  geom_violin(scale = "width") +
   facet_wrap(name ~ ., ncol = 4) +
   theme_bw() +
   scale_fill_manual(values = cluster_color_palette, name = "Seurat Cluster") +
-  labs(x = "CARD deconvolution proprotion estimates", y = "Seurat cluster") +
+  labs(x = "RCTD proprotion", y = "Seurat cluster") +
   theme_minimal() + 
   theme(legend.position = "none",
         panel.grid.major.y = element_blank(),
@@ -211,47 +263,17 @@ panel.e = deconv_df %>%
   xlim(0, 1)
 
 panel.e
-```
-```{r}
-library(patchwork)
-```
 
-
-```{r, fig.height=10, fig.width=14}
-patch = (((panel.a | plot_spacer() | (panel.b / panel.c)) + 
-    plot_layout(widths = unit(c(4, 0.5, 4), c("in", "in", "in"))))/ 
-  (panel.d | panel.e)) +
-  plot_layout(heights = unit(c(4, 3), c("in", "in"))) +
-  plot_annotation(tag_levels = "A",
-                  tag_suffix = ".")
-patch
+ggsave('main_fig_2_panel_e.png', 
+       plot = panel.e, 
+       width = 8, 
+       height = 4, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
 
-```{r}
-ggsave(
-  filename = "main_figure_deconv_subtype.png",
-  plot = patch,
-  path = ".",
-  width = 14,
-  height = 10,
-  units = "in",
-  dpi = 330,
-  limitsize = F,
-  bg = "white",
-)
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
 
 
 
