@@ -6,7 +6,11 @@ library(stringr)
 
 ### Load individual Visium samples and corresponding clustering assignment from integrated analysis 
 
-### Prerequisites:  ** exported outgoing signal summary csv from COMMOT
+### Prerequisites:  output from COMMOT analysis 
+## 1) commot_sender.csv
+## 2) commot_info.csv
+
+dir.create(file.path(".", "intermediate_output"))
 
 metadata = readRDS(file = file.path("..", "analysis_output", "visium_alistair_integrate_cluster.rds"))
 sample_abbrs = paste0("SP", 1:8)
@@ -105,7 +109,7 @@ for (i in 1:length(sample_abbrs)) {
     tidyr::pivot_longer(cols = -c("barcode", "sample", "total.signaling")) %>%
     dplyr::mutate(sample = sample_abbrs[i])
   df_all_sample_pathway = rbind(df_all_sample_pathway,
-                           df)
+                                df)
 }
 df_all_sample_pathway$subtype = sample2subtype[df_all_sample_pathway$sample]
 saveRDS(df_all_sample_pathway, 

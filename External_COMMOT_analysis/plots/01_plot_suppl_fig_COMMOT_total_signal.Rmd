@@ -154,19 +154,8 @@ plt.spatial = plot_df_all_sample_pathway %>%
     legend.title = element_text(size = 8),
     legend.position = "bottom"
   )
-
-# ggsave(
-#     filename = "temp3.png",
-#     plot  = plt.spatial,
-#     path = file.path("."),
-#     width = 3*8,
-#     height = 3 + 1,
-#     units = "in",
-#     dpi = 330,
-#     limitsize = F,
-#     bg = "white"
-#   )
 ```
+
 ```{r, fig.width=12, fig.height=8}
 lr_value_summary = df_all_sample_pathway %>% 
   dplyr::group_by(sample, name) %>%
@@ -188,16 +177,6 @@ plt.pathway = df_all_sample_pathway %>%
   theme(panel.grid.minor = element_blank())
 
 plt.pathway
-
-# ggsave("suppl_pathway_violin.png",
-#        plot = plt.pathway,
-#        path = ".",
-#        width = 12,
-#        height = 8, 
-#        units = "in",
-#        dpi = 330,
-#        limitsize = F,
-#        bg = "white")
 ```
 
 ```{r}
@@ -216,124 +195,4 @@ ggsave(
     limitsize = F,
     bg = "white"
   )
-```
-
-```{r}
-# card_deconv_props = readRDS( 
-#         file = file.path("..", "..", "analysis_output", "CARD", "CARD_deconv_summary_scvi_reference.rds"))
-```
-
-```{r}
-# df_card_deconv_prop = card_deconv_props %>% 
-#   dplyr::filter(source == "Alistair") %>%
-#   dplyr::mutate(barcode = sapply(str_split(cell_id, "_", simplify = F), "[[", 2)) %>%
-#   dplyr::select(-c("source", "cell_id")) %>% data.frame()
-# 
-# cts = colnames(df_card_deconv_prop)
-# cts = cts[!cts %in% c("sample", "barcode")]
-# 
-# df_commot_pathway_signal = df_all_sample_pathway %>%
-#   dplyr::select(sample, barcode, name, value) %>%
-#   dplyr::distinct(sample, barcode, name, .keep_all = T) %>%
-#   tidyr::pivot_wider(
-#     id_cols = c("sample", "barcode"),
-#     names_from = "name",
-#     values_from = "value"
-#   ) %>% data.frame()
-# 
-# ordered_pathway = lr_value_summary %>% 
-#   dplyr::arrange(desc(mean_value)) %>% 
-#   dplyr::ungroup() %>% 
-#   dplyr::select(name) %>% 
-#   as.vector() %>% 
-#   unlist() %>% unique()
-```
-
-```{r, fig.width=10, fig.height=4.5, warning=F, message=F}
-# ht.breaks = seq(from = -0.5, to = 0.5, by = 0.1)
-# ht.colpal = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdYlBu")))(length(ht.breaks))
-# 
-# df_card_commot = df_card_deconv_prop %>%
-#   dplyr::inner_join(df_commot_pathway_signal, by = c("sample", "barcode"))
-# 
-# for (s in sample_factor_level) {
-#   df_cor = df_card_commot %>%
-#     dplyr::filter(sample == s) %>%
-#     dplyr::select(-c("sample", "barcode"))
-#   
-#   corr_mat = cor(df_cor, use = "complete.obs", method = "spearman")
-#   
-#   pheatmap::pheatmap(
-#     corr_mat[cts, ordered_pathway],
-#     cluster_rows = F,
-#     cluster_cols = F,
-#     main = s,
-#     color = ht.colpal,
-#     breaks = ht.breaks
-#   )
-# }
-```
-
-```{r}
-# for (ct in cts) {
-#   for (pathway in ordered_pathway) {
-#     cor.test(df_cor[[ct]], df_cor[[pathway]], method = "spearman")
-#   }
-# }
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
 ```
