@@ -45,8 +45,20 @@ plt.dimplot = DimPlot(obj.integrated,
   coord_fixed() + 
   scale_color_manual(values = cluster_color_palette) +
   scale_fill_manual(values = cluster_color_palette) + 
-  ggtitle("")
+  ggtitle("Seurat integration cluster") + 
+  labs(x = "UMAP 1", y = "UMAP 2")
 plt.dimplot
+
+ggsave(
+  filename = "main_fig_3_panel_a.png",
+  plot = plt.dimplot,
+  path = ".",
+  width = 12,
+  height = 8,
+  dpi = 330,
+  units = "in",
+  bg = "white"
+)
 ```
 
 ```{r}
@@ -77,13 +89,42 @@ plt.barplot = obj.integrated@meta.data %>%
   labs(x = "Clusters", y = "Proportion") + 
   scale_fill_manual(values = RColorBrewer::brewer.pal(n=8, name="Dark2")) 
 plt.barplot
+
+ggsave(
+  filename = "main_fig_3_panel_b.png",
+  plot = plt.barplot,
+  path = ".",
+  width = 6,
+  height = 4,
+  dpi = 330,
+  units = "in",
+  bg = "white"
+)
 ```
 
 ```{r}
-nebula_cluster_degs_filter = readRDS(file = file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs.rds"))
-nebula_cluster_degs_filter = nebula_cluster_degs_filter[as.character(0:11)[as.character(0:11) %in% names(nebula_cluster_degs_filter) ]]
-nebula_cluster_degs_ct_independent = readRDS(file =file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs_ct_ind.rds") )
-nebula_cluster_degs_ct_dependent = readRDS(file =file.path("..", "intermediate_output", "nebula", "nebula_alistair_integrate_top_cluster_DEGs_ct_dep.rds") )
+nebula_obj = readRDS(file = file.path(
+  "..",
+  "intermediate_output",
+  "nebula",
+  "DEGs",
+  "nebula_CARD_corrected_DEGs.rds")
+)
+
+nebula_cluster_degs_filter = nebula_obj$degs_filter
+nebula_cluster_degs_filter = nebula_cluster_degs_filter[as.character(0:11)[as.character(0:11) %in% names(nebula_cluster_degs_filter)]]
+
+nebula_obj_ct_dependent = readRDS(
+  file = file.path(
+    "..",
+    "intermediate_output",
+    "nebula",
+    "DEGs",
+    "nebula_CARD_corrected_ct_DEGs.rds"
+  )
+)
+
+nebula_cluster_degs_ct_dependent = nebula_obj_ct_dependent$degs_filter
 ```
 
 ```{r, fig.width=30, fig.height=4}
@@ -99,20 +140,19 @@ plt.dotplot = DotPlot(
   ggtitle("Nebula cluster DEGs") + 
   theme(strip.clip = "off")
 plt.dotplot
+
+ggsave(
+  filename = "main_fig_3_panel_c.png",
+  plot = plt.dotplot,
+  path = ".",
+  width = 25,
+  height = 4,
+  dpi = 330,
+  units = "in",
+  bg = "white"
+)
 ```
 
-```{r, fig.width=30, fig.height=4}
-DotPlot(
-  obj.integrated,
-  assay = "integrated",
-  features = sapply(nebula_cluster_degs_ct_independent, FUN = function(x) names(x)[1:min(15, length(x))], simplify = F),
-  group.by = "seurat_clusters"
-) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  guides(color = guide_colorbar(title = 'Raw z-score')) + 
-  scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") + 
-  ggtitle("Nebula cluster DEGs not associated with composition")
-```
 
 ```{r, fig.width=30, fig.height=4}
 DotPlot(
@@ -139,19 +179,19 @@ xx.ego.BP = readRDS(
   file = file.path(
     "..",
     "intermediate_output",
-    "nebula",
-    "nebula_top_deg_ct_dependent_ego_bp.rds"
+    "GO",
+    "GO_nebula_CARD_corrected.rds"
   )
 )
 
-plt.ego1 = emapplot(
+ego.plt = emapplot(
   xx.ego.BP,
   pie = "count",
   layout = "kk",
   repel = T,
   cex_label_category = 0.75,
   cex_label_group = 2,
-  cex_category = 3,
+  cex_category = 5,
   cex_line = 0.5 ,
   showCategory = 20,
   node_label = "category",
@@ -162,7 +202,19 @@ plt.ego1 = emapplot(
                     drop = FALSE,
                     breaks = as.character(0:11)) +
   theme(legend.key.size = unit(0.25, 'in')) 
-plt.ego1
+
+ego.plt
+
+ggsave(
+  filename = "main_fig_3_panel_d.png",
+  plot = ego.plt,
+  path = ".",
+  width = 12,
+  height = 12,
+  dpi = 330,
+  units = "in",
+  bg = "white"
+)
 ```
 
 ```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
@@ -170,106 +222,41 @@ xx.ego.BP = readRDS(
   file = file.path(
     "..",
     "intermediate_output",
-    "nebula",
-    "nebula_top_deg_ct_independent_ego_bp.rds"
+    "GO",
+    "GO_ct_nebula_CARD_corrected.rds"
   )
 )
 
-plt = emapplot(
+ego.plt.ct = emapplot(
   xx.ego.BP,
   pie = "count",
   layout = "kk",
   repel = T,
   cex_label_category = 0.75,
   cex_label_group = 2,
-  cex_category = 3,
+  cex_category = 5,
   cex_line = 0.5 ,
   showCategory = 20,
   node_label = "category",
   label_format = 30,
   nWords = 4
 ) +
-  scale_fill_manual(values = cluster_color_palette,
-                    drop = FALSE,
-                    breaks = as.character(0:11)) +
   theme(legend.key.size = unit(0.25, 'in')) 
-plt
-```
 
-```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
-xx.ego.BP = readRDS(
-  file = file.path(
-    "..",
-    "intermediate_output",
-    "nebula",
-    "nebula_all_deg_ego_bp.rds"
-  )
+ego.plt.ct
+
+ggsave(
+  filename = "main_fig_3_panel_e.png",
+  plot = ego.plt.ct,
+  path = ".",
+  width = 12,
+  height = 12,
+  dpi = 330,
+  units = "in",
+  bg = "white"
 )
-
-plt = emapplot(
-  xx.ego.BP,
-  pie = "count",
-  layout = "kk",
-  repel = T,
-  cex_label_category = 0.75,
-  cex_label_group = 2,
-  cex_category = 3,
-  cex_line = 0.5 ,
-  showCategory = 20,
-  node_label = "category",
-  label_format = 30,
-  nWords = 4
-) +
-  scale_fill_manual(values = cluster_color_palette,
-                    drop = FALSE,
-                    breaks = as.character(0:11)) +
-  theme(legend.key.size = unit(0.25, 'in')) 
-plt
 ```
 
-```{r, fig.width=12, fig.height=12, dpi = 330, warning=FALSE}
-xx.ego.BP = readRDS(
-  file = file.path(
-    "..",
-    "intermediate_output",
-    "nebula",
-    "nebula_ct_top_deg_ego_bp.rds"
-  )
-)
-
-plt.ego2 = emapplot(
-  xx.ego.BP,
-  pie = "count",
-  layout = "kk",
-  repel = T,
-  cex_label_category = 0.75,
-  cex_label_group = 2,
-  cex_category = 3,
-  cex_line = 0.5 ,
-  showCategory = 20,
-  node_label = "category",
-  label_format = 30,
-  nWords = 4
-) + 
-  guides(fill = guide_legend(title = "Celltype")) + 
-  theme(legend.key.size = unit(0.25, 'in')) 
-plt.ego2
-```
-```{r}
-library(patchwork)
-```
-
-```{r, fig.width=24, fig.height=21, dpi=330}
-patch = (((plt.dimplot | plt.barplot) + plot_layout(widths = c(0.7,0.3))) / 
-           plt.dotplot / 
-           ((plt.ego1 | plt.ego2) + plot_layout(widths = c(0.5,0.5))) ) + 
-  plot_layout(heights = c(6, 3, 12)) + 
-  plot_annotation(tag_levels = "A")
-```
-
-```{r}
-ggsave(filename = "figure_3_cluster_profiler.png", plot = patch, path = ".", width = 24, height = 21, dpi = 330, units = "in", bg = "white")
-```
 
 ```{r}
 canonical_markers = list(
@@ -295,34 +282,88 @@ plt.dotplot = DotPlot(
   ggtitle("Nebula cluster DEGs") + 
   theme(strip.clip = "off")
 plt.dotplot
+
+ggsave(
+  filename = "suppl_fig_5_panel_a.png",
+  plot = plt.dotplot,
+  path = ".",
+  width = 6,
+  height = 4,
+  dpi = 330,
+  units = "in",
+  bg = "white"
+)
 ```
+
+# Load CARD deconvolution results
 ```{r}
-annotated_celltypes = unique(read.csv(file.path("..", "..", "data", "scVI_output", "annotation_dict.csv"), header = F)$V2)
+annotation_dict = read_csv(file.path("..", 
+                                     "..",
+                                     "data", 
+                                     "scVI_integration_output", 
+                                     "annotation_dict.csv"),
+                           col_names = F)
+
+deconv.props.list.CARD = readRDS(
+  file = file.path(
+    "..",
+    "..",
+    "deconvolution",
+    "intermediate_output",
+    "CARD",
+    "props.rds"
+  )
+)
+
+# merge outputs 
+card.full.out.merge = NULL
+for (n in names(deconv.props.list.CARD)) {
+  abbr = strsplit(n, "_")[[1]][2]
+  s = strsplit(n, "_")[[1]][1]
+  
+  df = deconv.props.list.CARD[[n]]
+  spot_ids = paste0(abbr, "_" , rownames(df))
+  rownames(df) = spot_ids 
+  df = as_tibble(df)
+  df = df %>% 
+    dplyr::mutate(spot_id = spot_ids,
+                  sample = s)
+  
+  card.full.out.merge = rbind(card.full.out.merge,
+                              df)
+}
+
+# convert into long df format for plotting 
+deconv_df = obj.integrated@meta.data %>% 
+  dplyr::mutate(spot_id = paste0(sample, "_", barcode)) %>% 
+  dplyr::select(sample, seurat_clusters_order, spot_id) %>% 
+  dplyr::left_join(card.full.out.merge %>% dplyr::select(-c(sample)), by = "spot_id") %>% 
+  dplyr::filter(!is.na(sample)) %>%
+  tidyr::pivot_longer(cols = -c(sample, seurat_clusters_order, spot_id))
+deconv_df
+```
+
+# Load cell types names present in the deconvolution results and specify a order
+```{r}
+annotated_celltypes = unique(read.csv(file.path("..", "..", "data", "scVI_integration_output", "annotation_dict.csv"), header = F)$V2)
+
 annotated_celltypes_order = c(annotated_celltypes[grepl("^Epithelial", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Mesothelial", annotated_celltypes)],
                               annotated_celltypes[grepl("^Endothelial", annotated_celltypes)],
                               annotated_celltypes[grepl("^Macrophage", annotated_celltypes)],
+                              annotated_celltypes[grepl("^Monocyte", annotated_celltypes)],
+                              annotated_celltypes[grepl("^pDC", annotated_celltypes)],
                               annotated_celltypes[grepl("^Plasmablast", annotated_celltypes)],
                               annotated_celltypes[grepl("^T", annotated_celltypes)],
                               annotated_celltypes[grepl("^Fibroblast", annotated_celltypes)],
                               annotated_celltypes[grepl("^Myofibroblast", annotated_celltypes)])
-
-CARD_summary_df = readRDS(file = file.path("..", "..", "analysis_output", "CARD", "CARD_deconv_summary_scvi_reference.rds"))
-match_idx = match(CARD_summary_df$cell_id, 
-                  paste0(obj.integrated@meta.data$sample, "_", obj.integrated@meta.data$barcode))
-CARD_summary_df$seurat_clusters = obj.integrated@meta.data$seurat_clusters[match_idx]
-CARD_summary_df = CARD_summary_df[!is.na(CARD_summary_df$seurat_clusters),] 
-
-CARD_summary_df_long = CARD_summary_df %>% 
-  tidyr::pivot_longer(cols = -c(source, sample, cell_id, seurat_clusters), names_to = "celltype", values_to = "prop") %>% 
-  dplyr::mutate(celltype = factor(celltype, levels = annotated_celltypes_order),
-                seurat_clusters = factor(seurat_clusters, levels = cluster_order))
 ```
 
 ```{r, fig.width=8, fig.height=8}
-plt.barplot = CARD_summary_df_long %>% 
-  ggplot(aes(y = seurat_clusters, x = prop, fill = seurat_clusters)) + 
-  geom_boxplot(outlier.size = 0.5) +
-  facet_wrap(.~celltype) + 
+plt.barplot = deconv_df %>% 
+  ggplot(aes(y = seurat_clusters_order, x = value, fill = seurat_clusters_order)) + 
+  geom_violin(scale = "width") +
+  facet_wrap(.~name) + 
   scale_fill_manual(values = cluster_color_palette) + 
   theme_minimal() + 
   theme(legend.position = "none",
@@ -331,54 +372,15 @@ plt.barplot = CARD_summary_df_long %>%
         panel.border = element_rect(color = "black", fill = NA)) +
   labs(x = "Proportion", y = "Cluster")
 plt.barplot
-```
 
-```{r, fig.width=12, fig.height=14}
-patch = ((plt.dotplot | plot_spacer()) / plt.barplot) + 
-  plot_layout(heights = unit(c(2, 8), c("in", "in")),
-              widths = unit(c(8, 4), c("in", "in"))) + 
-  plot_annotation(tag_levels = "A", tag_suffix = ".")
-
-patch
-```
-
-```{r}
-ggsave(filename = "suppl_figure_epi_stroma_deconv.png", plot = patch, path = ".", 
-       width = 12, height = 14, dpi = 330, units = "in", bg = "white")
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
-```
-
-```{r}
-
+ggsave(
+  filename = "suppl_fig_5_panel_b.png",
+  plot = plt.barplot,
+  path = ".",
+  width = 8,
+  height = 8,
+  dpi = 330,
+  units = "in",
+  bg = "white"
+)
 ```
