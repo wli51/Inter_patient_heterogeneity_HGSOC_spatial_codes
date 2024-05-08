@@ -4,8 +4,11 @@ library(dplyr)
 
 
 ### this script involves manual curation of integrate cluster DE results
+### and computes the seurat module score for the manually curated DEG genesets
 
 ### Prerequisites:  04_Alistair_st_integrate_cluster_DE_fib_rich.R
+
+dir.create(file.path(".", "intermediate_output", "module_score"))
 
 dir = file.path("..", "analysis_output", "Alistair_st")
 
@@ -42,14 +45,16 @@ rp_features = c(rp_s_genes[order(rp_s_genes)][1:5], rp_l_genes[order(rp_l_genes)
 ig_genes= common_gene_names[grep("^IG[KLH]", common_gene_names)]
 ig_features = ig_genes[order(ig_genes)]
 
-# isolate common fibroblast DE genes 
-de_genes_fibro_vs_list = readRDS(file = file.path("intermediate_output", "integrate_fib_vs_other_cluster_DE.rds"))
-fib_common_features = Reduce(intersect, sapply(de_genes_fibro_vs_list, FUN = rownames, simplify = F))
-fib_common_features = fib_common_features[! fib_common_features %in% c(hla_genes, hla_d_genes, mt_genes, rp_s_genes, rp_s_genes, ig_genes)]
-
 # Remove all the genesets defined above from the standard cluster based DE output 
-DE_df_list = readRDS(file = file.path("intermediate_output", "integrate_cluster_DE.rds"))
-DE_genes = sapply(DE_df_list, rownames)
+
+DEGs.cluster = readRDS(file = file.path(
+  "intermediate_output",
+  "nebula",
+  "DEGs",
+  "nebula_CARD_corrected_DEGs.rds"
+))
+
+DE_genes = sapply(DEGs.cluster$degs_filter, names)
 DE_genes = DE_genes[cluster_order[cluster_order %in% names(DE_genes)]]
 DE_genes_filter = DE_genes
 DE_genes_filter = sapply(
@@ -61,8 +66,7 @@ DE_genes_filter = sapply(
       mt_genes,
       rp_s_genes,
       rp_s_genes,
-      ig_genes,
-      fib_common_features
+      ig_genes
     )]
 )
 
@@ -77,18 +81,31 @@ DE_genes_filter = sapply(
 
 DE_genes_filter[["MHC"]] = hla_features
 DE_genes_filter[["IG"]] = ig_features
-DE_genes_filter[["Fibroblast common DEGs"]] = fib_common_features
 DE_genes_filter[["MT"]] = mt_features
 DE_genes_filter[["Ribo"]] = rp_features
 
 DE_genes_filter = DE_genes_filter[sapply(DE_genes_filter, length) >= 5]
 
-
-saveRDS(
-  DE_genes_filter,
-  file = file.path(
-    "intermediate_output",
-    "integrate_cluster_DE_manual.rds"
+for (i in 1:length(sample_abbrs)) {
+  obj.list[[i]]@meta.data = obj.list[[i]]@meta.data %>% 
+    dplyr::select(!starts_with("moudle."))
+  
+  obj.list[[i]] = AddModuleScore(
+    obj.list[[i]],
+    features = DE_genes_filter,
+    pool = NULL,
+    nbin = 24,
+    ctrl = 100,
+    k = FALSE,
+    assay = "SCT",
+    name = "module.",
+    seed = 1,
+    search = FALSE
   )
-)
-
+  
+  module_scores = obj.list[[i]]@meta.data %>% select(starts_with("module."))
+  colnames(module_scores) = names(DE_genes_filter) 
+  saveRDS(module_scores, file = file.path("intermediate_output", 
+                                          "module_score",
+                                          paste0("integrate_DE_module_score_",sample_abbrs[i], ".rds")))
+}
