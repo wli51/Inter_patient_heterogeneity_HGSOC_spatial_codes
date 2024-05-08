@@ -6,8 +6,9 @@ library(nebula)
 
 ### This script performs NMF cluster based differential gene expression analysis using nebula
 
-### Prerequisites:  ** 01_Utah_st_analysis.R outputs(preprocessing output)
-###                 ** 02_Utah_st_NMF.R outputs(NMF clustering)
+### Prerequisites:  
+## 1) output from 01_Utah_st_analysis.R (preprocessing)
+## 2) output from 02_Utah_st_NMF.R outputs(NMF clustering)
 
 dir.create(file.path("intermediate_output", "DE"))
 
