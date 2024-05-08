@@ -24,7 +24,13 @@ obj.integrated = readRDS(file = file.path("..", "..", "analysis_output", "Utah_s
 ```
 
 ```{r}
-load(file.path("..", "intermediate_output", "vb_nmf_cluster_info.RData"))
+# load(file.path("..", "intermediate_output", "vb_nmf_cluster_info.RData"))
+vb_nmf <- readRDS(file.path("..", "intermediate_output", "vb_nmf.rds"))
+
+spot_id = colnames(vb_nmf)
+sample = sapply(strsplit(spot_id, "_"), "[[", 1)
+barcodes = sapply(strsplit(spot_id, "_"), "[[", 2)
+cluster_ids = cluster_id(vb_nmf, rank=optimal_rank(vb_nmf)$ropt)
 nmf_clusters = unique(cluster_ids)[order(unique(cluster_ids))]
 ```
 
@@ -62,7 +68,7 @@ col_pal = setNames(RColorBrewer::brewer.pal(n = 10, name = "Set3"), as.character
 ```
 
 ```{r, fig.height=5, fig.width=3}
-summary_plot = NMF_summary_df %>% 
+summary.bar.plt = NMF_summary_df %>% 
   dplyr::mutate(value = 1,
                 cluster = factor(cluster)) %>% 
   ggplot(aes(x = factor(sample), y = value, fill = cluster)) + 
@@ -75,13 +81,25 @@ summary_plot = NMF_summary_df %>%
   theme(legend.position = "right",
         legend.direction = "vertical",
         panel.grid.major = element_blank())
-summary_plot
+summary.bar.plt
+
+ggsave('main_fig_1_panel_d.png', 
+       plot = summary.bar.plt, 
+       width = 3, 
+       height = 5, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
 # plot NMF cluster in space
 ```{r, warning=FALSE, message=FALSE}
 plot.list.spatial = list()
 
 plt.sf = 1.5
+
+plot_label = setNames(c("a", "b", "c"),
+                      c(1, 2, 3))
 
 for (i in 1:length(sample_abbrs)) {
   sf = obj.list[[i]]@images[[1]]@scale.factors$lowres
@@ -110,6 +128,14 @@ for (i in 1:length(sample_abbrs)) {
       title.position = "top"
     )) 
   
+  ggsave(paste0("main_fig_1_panel_", plot_label[i], ".png"), 
+       plot = plot.list.spatial[[i]], 
+       width = 5, 
+       height = 5, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 }
 ```
 
@@ -192,6 +218,15 @@ expr.dot.plt = DotPlot(
   scale_colour_gradient2(low = "#FF00FF", mid = "#000000", high = "#FFFF00") 
 
 expr.dot.plt
+
+ggsave('main_fig_1_panel_e.png', 
+       plot = expr.dot.plt, 
+       width = 25, 
+       height = 4, 
+       units = "in", 
+       dpi = 330, 
+       bg = "white", 
+       limitsize = F)
 ```
 
 # load cell2location output
@@ -200,7 +235,11 @@ library(readr)
 cell2loc_export = list()
 cell2loc_export_long = list()
 for (i in 1:length(sample_abbrs)) {
-  cell2loc_export[[i]] = read_csv(file.path("..", "cell2loc_export","export", sample_abbrs[i], "cell2loc.csv"))
+  cell2loc_export[[i]] = read_csv(file.path("..", 
+                                            "..", 
+                                            "data",
+                                            "Cell2Location_output",
+                                            "export", sample_abbrs[i], "cell2loc.csv"))
   colnames(cell2loc_export[[i]])[1] = 'barcode'
   
   cell2loc_export_long[[i]] = cell2loc_export[[i]] %>% 
@@ -246,94 +285,107 @@ plot_df = plot_df %>%
   tidyr::pivot_longer(cols = -c("NMF_cluster", "sample", "barcode", "row", "col", "imagerow", "imagecol"))
 ```
 
+```{r}
+scale_0_1 <- function(x) {
+  (x - min(x, na.rm = T))/(max(x, na.rm = T) - min(x, na.rm = T))
+}
+
+plot_df = plot_df %>% 
+  dplyr::ungroup() %>%
+  dplyr::group_by(name, sample) %>% 
+  dplyr::mutate(value_scale = scale_0_1(value),
+                cluster_group = ifelse(NMF_cluster %in% c(6, 10), as.character(NMF_cluster), "other"),
+                NMF_cluster = factor(NMF_cluster,
+                                     levels = c("6", "10", "1", "2", "3", "4", "5", "7", "8", "9"))) 
+```
+
 # plot cell2location summary and spatial visualization
 
 ```{r}
 col_pal = setNames(RColorBrewer::brewer.pal(n = 10, name = "Set3"), as.character(1:10))
 ```
 
-```{r, fig.width=10, fig.height=8}
-plt.abun.summary = plot_df %>%
-  dplyr::filter(name %in% c("Epithelial cell-0", "Epithelial cell-16", "Epithelial cell-3", "Epithelial cell-4", "Epithelial cell-17")) %>%
+```{r, fig.width=14, fig.height=5}
+cell.summary.box.plt = plot_df %>%
+  dplyr::filter(grepl("^(Epithelial)", name)) %>%
+  dplyr::mutate(name = gsub("\\(WFDC2\\)", "", name)) %>%
   ggplot(aes(
-    x = factor(NMF_cluster),
-    fill = factor(NMF_cluster),
+    x = NMF_cluster,
+    fill = NMF_cluster,
     y = value
   )) +
   geom_boxplot() +
-  facet_grid(sample ~ name) +
-  ylim(0,6) + 
+  facet_grid(sample ~ name) + 
   theme_minimal() +
   scale_fill_manual(values = col_pal,
-                    name = "Cluster") 
-plt.abun.summary
+                    name = "Cluster") + 
+  labs(x = "NMF cluster",
+       y = "Cell2Location abundance") + 
+  theme(legend.position = "none")
+cell.summary.box.plt
+
+ggsave('suppl_fig_1_panel_a.png',
+       plot = cell.summary.box.plt,
+       width = 14,
+       height = 5,
+       units = "in",
+       dpi = 330,
+       bg = "white",
+       limitsize = F)
 ```
 
-```{r, fig.width=15, fig.height=8}
-ct_select = c("Epithelial cell-0", "Epithelial cell-16")
-plt.pt.size = 1
-colpal = rev(RColorBrewer::brewer.pal(n = 9, name = "RdYlBu"))
-
-plt.ct.abun = plot_df %>% 
-  dplyr::filter(name %in% ct_select) %>% 
+```{r, fig.width=14, fig.height=5}
+cell.summary.box.plt = plot_df %>%
+  dplyr::filter(grepl("^(Mesothelial)|(Fibroblast)|(Myofibroblast)", name)) %>%
   ggplot(aes(
-    x = imagecol,
-    y = -imagerow,
-    fill = value
+    x = NMF_cluster,
+    fill = NMF_cluster,
+    y = value_scale
   )) +
-  ggstar::geom_star(starshape = 6,
-                    size = plt.pt.size,
-                    starstroke = 0) +
-  ylim(c(-600, 0)) + xlim(0, 600) +
-  facet_grid(sample ~ name,
-             switch = "y") +
-  scale_y_continuous(position = "right") +
-  coord_fixed() +
-  theme_void() + 
-  scale_fill_gradientn(colors = colpal,
-                       breaks=c(0, 1, 3, 5),
-                       limits = c(0, 5),
-                       na.value = colpal[length(colpal)])
+  geom_boxplot() +
+  facet_grid(sample ~ name) + 
+  theme_minimal() +
+  scale_fill_manual(values = col_pal,
+                    name = "Cluster") + 
+  labs(x = "NMF cluster",
+       y = "Cell2Location abundance") + 
+  theme(legend.position = "none")
+cell.summary.box.plt
 
-plt.ct.abun
+ggsave('suppl_fig_1_panel_b.png',
+       plot = cell.summary.box.plt,
+       width = 14,
+       height = 5,
+       units = "in",
+       dpi = 330,
+       bg = "white",
+       limitsize = F)
 ```
 
-# create final figure
+```{r, fig.width=12, fig.height=5}
+cell.summary.box.plt = plot_df %>%
+  dplyr::filter(grepl("^(Macrophage)|(Monocyte)|(pDC)|(T Lymphocyte)|(Plasmablast)", name)) %>%
+  ggplot(aes(
+    x = NMF_cluster,
+    fill = NMF_cluster,
+    y = value_scale
+  )) +
+  geom_boxplot() +
+  facet_grid(sample ~ name) + 
+  theme_minimal() +
+  scale_fill_manual(values = col_pal,
+                    name = "Cluster") + 
+  labs(x = "NMF cluster",
+       y = "Cell2Location abundance") + 
+  theme(legend.position = "none")
+cell.summary.box.plt
 
-```{r}
-layout <- c(
-  
-  area(1, 1, 1, 1),
-  area(1, 2, 1, 2),
-  area(1, 3, 1, 3),
-  area(1, 4, 1, 4),
-  area(2, 1, 2, 4),
-  area(3, 1, 4, 2),
-  area(3, 3, 4, 4)
-)
-
-plot(layout)
-```
-
-```{r, fig.width=24, fig.height=20, dpi = 330, warning=FALSE}
-patch = 
-  plot.list.spatial[[1]] + plot.list.spatial[[2]] + plot.list.spatial[[3]] + summary_plot + 
-  expr.dot.plt + plt.ct.abun + plt.abun.summary + 
-  plot_layout(design = layout,
-              heights = unit(c(5, 2, 4), rep('inch', 3)),
-              widths = unit(c(5, 5, 5, 2), rep('inch', 4))) +
-  plot_annotation(tag_levels = 'A') &
-  theme(title = element_text(size = 12))
-patch
-```
-
-```{r}
-ggsave('main_fig_utah_st_cluster_DEG_cell2loc.png', 
-       plot = patch, 
-       width = 24, 
-       height = 20, 
-       units = "in", 
-       dpi = 330, 
-       bg = "white", 
+ggsave('suppl_fig_1_panel_c.png',
+       plot = cell.summary.box.plt,
+       width = 12,
+       height = 5,
+       units = "in",
+       dpi = 330,
+       bg = "white",
        limitsize = F)
 ```
