@@ -45,3 +45,4 @@ Our results highlight immune and vascular pathways with distinct spatial localiz
 - **Cell-Cell Communication**  
   - Conducted with **COMMOT** using CellChat ligand-receptor database, spatial interaction distance = 250 µm.  
 
+
