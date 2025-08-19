@@ -1,0 +1,47 @@
+# Spatial Transcriptomics of Ovarian High-Grade Serous Carcinoma (HGSC)
+
+This repository contains analysis code and processed results associated with our manuscript on spatially resolved transcriptomics of ovarian high-grade serous carcinoma (HGSC). The study integrates single-cell and spatial transcriptomic data to investigate intra- and inter-tumor heterogeneity, spatial immune organization, and subtype-specific signaling patterns within the HGSC tumor microenvironment (TME).
+
+## Overview
+
+Ovarian HGSC is an aggressive cancer characterized by a heterogeneous tumor microenvironment. Using 10x Genomics Visium spatial transcriptomics and scRNA-seq data, this project examines:
+
+- **Spatial domain identification** via non-negative matrix factorization (NMF) and clustering.
+- **Integration of Visium datasets** across patient samples using Seurat and batch correction pipelines.
+- **Single-cell integration** of HGSC datasets with scVI to define cell states and tumor/stromal subpopulations.
+- **Differential gene expression (DGE)** analyses across predicted spatial domains and cell states.
+- **Functional enrichment** of spatial domains and clusters.
+- **Cell type deconvolution** of spatial spots using CARD and Cell2location.
+- **Molecular subtype assignment** of samples using consensusOV and related classifiers.
+- **Spatially aware cell-cell communication** analysis using COMMOT to identify subtype-specific signaling heterogeneity.
+
+Our results highlight immune and vascular pathways with distinct spatial localization patterns, reveal shared and subtype-specific cell states, and demonstrate that multiple tissue slices may be required per patient to comprehensively characterize HGSC spatial landscapes.
+
+## Methods Summary
+
+- **Preprocessing & QC**  
+  - Visium data processed with 10x SpaceRanger (v3.0.1).  
+  - scRNA-seq processed with Cell Ranger (v7.0.0).  
+  - QC filtering: cells with <200 genes or >25% mitochondrial content removed; genes with <3 cells excluded.  
+
+- **Spatial Transcriptomics (Visium)**  
+  - Normalization via Seurat SCTransform (regressing mitochondrial %, ribosomal %, UMI counts).  
+  - Batch integration with Seurat (`FindIntegrationAnchors`, `IntegrateData`).  
+  - NMF (via **ccfindR**) for spatial domain detection.  
+  - Differential expression: Seurat `FindMarkers` + Nebula for spatial DE testing.  
+
+- **Single-Cell RNA-seq Integration**  
+  - Feature selection: top 3000 highly variable genes (Seurat v3 flavor).  
+  - Integration with **scVI** (latent dim=30, negative binomial likelihood).  
+  - Leiden clustering, annotation with canonical marker genes.  
+
+- **Functional Analysis**  
+  - Gene Ontology enrichment via **clusterProfiler** and visualization with **enrichplot**.  
+
+- **Deconvolution & Subtyping**  
+  - **CARD** and **Cell2location** used for spot-level cell type inference.  
+  - Subtype assignment via **consensusOV**, **Helland**, **Konecny**, and **Verhaak** classifiers.  
+
+- **Cell-Cell Communication**  
+  - Conducted with **COMMOT** using CellChat ligand-receptor database, spatial interaction distance = 250 µm.  
+
